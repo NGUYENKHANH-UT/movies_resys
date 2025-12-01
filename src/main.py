@@ -25,7 +25,13 @@ def main():
     # 2. Data Loading
     dataset = MargoDataset()
     # Shuffle=True is crucial for training
-    dataloader = DataLoader(dataset, batch_size=Config.batch_size, shuffle=True)
+    dataloader = DataLoader(
+        dataset, 
+        batch_size=Config.batch_size, 
+        shuffle=True,
+        num_workers=2, 
+        pin_memory=True
+    )
     
     # 3. Model Initialization
     print("Initializing MARGO Model...")
