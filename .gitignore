@@ -1,0 +1,5 @@
+*.env
+data/
+milvus/
+ml-20m-psm/
+venv/
