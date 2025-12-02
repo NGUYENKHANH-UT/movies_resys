@@ -49,7 +49,7 @@ class Config:
     feat_dim_t = 768        # Text Vector Size (SBERT all-mpnet-base-v2)
     
     # --- Training Params ---
-    batch_size = 16384
+    batch_size = 32768
     lr = 1e-3
     weight_decay = 1e-4
     
