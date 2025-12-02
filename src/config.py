@@ -55,7 +55,7 @@ class Config:
     
     # Max epochs (Controlled by Early Stopping in Trainer)
     epochs_stage1 = 20      # Warm-up Stage
-    epochs_stage2 = 20      # Reliability Learning Stage
+    epochs_stage2 = 30      # Reliability Learning Stage
     
     # --- MARGO Specifics ---
     tau = 0.1               # Temperature (Sensitivity of Confidence function)
