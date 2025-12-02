@@ -18,8 +18,7 @@ class MARGO(nn.Module):
         
         # --- MARGO PARAMETERS ---
         # Reliability Weights W [N_items, 2]. Column 0: Visual, Column 1: Text
-        # Initialize randomly
-        self.item_modality_weights = nn.Parameter(torch.randn(num_items, 2).to(self.device))
+        self.item_modality_weights = nn.Parameter(torch.zeros(num_items, 2).to(self.device))
         
         # Stage control variable
         self.stage = 1

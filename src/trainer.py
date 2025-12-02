@@ -9,6 +9,14 @@ from .config import Config
 
 class Trainer:
     def __init__(self, model, dataloader, evaluator):
+        """
+        Initialize Trainer with fresh optimizer and training states.
+        
+        Args:
+            model: MARGO model instance
+            dataloader: Training data loader
+            evaluator: Evaluator instance for validation
+        """
         self.model = model
         self.dataloader = dataloader
         self.evaluator = evaluator
@@ -20,26 +28,86 @@ class Trainer:
         self.scaler = GradScaler('cuda')
         self.use_amp = False
 
-        # Early stopping based on Recall@20
+        # Early stopping parameters - always start with defaults
         self.patience_limit = 5
         self.best_score = -float('inf')
         self.patience_counter = 0
+        
+        print(f"Trainer initialized: LR={Config.lr}, Patience={self.patience_limit}")
 
-    def save_checkpoint(self, filename):
+    def save_checkpoint(self, filename, epoch=0):
+        """
+        Save complete checkpoint including model, optimizer, and training states.
+        
+        Args:
+            filename: Name of checkpoint file
+            epoch: Current epoch number
+        """
         path = os.path.join(Config.checkpoint_dir, filename)
         os.makedirs(Config.checkpoint_dir, exist_ok=True)
-        torch.save(self.model.state_dict(), path)
+        
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'scaler_state_dict': self.scaler.state_dict(),
+            'best_score': self.best_score,
+            'patience_counter': self.patience_counter,
+            'stage': self.model.stage
+        }
+        
+        torch.save(checkpoint, path)
         print(f"Checkpoint saved: {path}")
 
-    def load_best_model(self, filename):
+    def load_checkpoint(self, filename, load_optimizer=True):
+        """
+        Load checkpoint with optional optimizer state.
+        
+        Args:
+            filename: Name of checkpoint file
+            load_optimizer: If True, load optimizer state (for resuming training)
+                          If False, only load model weights (for transfer learning)
+        
+        Returns:
+            checkpoint dict if successful, None otherwise
+        """
         path = os.path.join(Config.checkpoint_dir, filename)
-        if os.path.exists(path):
-            self.model.load_state_dict(torch.load(path, map_location=Config.device))
-            print("Best model loaded from checkpoint.")
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Checkpoint not found: {path}")
+        
+        checkpoint = torch.load(path, map_location=Config.device)
+        
+        # Always load model weights
+        if 'model_state_dict' in checkpoint:
+            self.model.load_state_dict(checkpoint['model_state_dict'])
         else:
-            print("Warning: Checkpoint not found.")
+            # Backward compatibility with old format
+            self.model.load_state_dict(checkpoint)
+        
+        print(f"Model weights loaded from {filename}")
+        
+        # Conditionally load training states
+        if load_optimizer:
+            if 'optimizer_state_dict' in checkpoint:
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                print("  Optimizer state: RESTORED")
+            
+            if 'scaler_state_dict' in checkpoint:
+                self.scaler.load_state_dict(checkpoint['scaler_state_dict'])
+                print("  Scaler state: RESTORED")
+            
+            self.best_score = checkpoint.get('best_score', -float('inf'))
+            self.patience_counter = checkpoint.get('patience_counter', 0)
+            print(f"  Best score: {self.best_score:.5f}")
+            print(f"  Patience: {self.patience_counter}/{self.patience_limit}")
+            
+            return checkpoint
+        else:
+            print("  Optimizer: NOT loaded (using fresh Adam)")
+            print("  Starting with default training states")
+            return None
 
-    def run_stage(self, stage_name, num_epochs, early_stopping=True):
+    def run_stage(self, stage_name, num_epochs, early_stopping=True, start_epoch=0):
         """
         Train the model for one stage (either warm-up or fine-tuning).
         
@@ -47,12 +115,11 @@ class Trainer:
             stage_name: Name of the training stage
             num_epochs: Maximum number of epochs
             early_stopping: Whether to apply early stopping
+            start_epoch: Starting epoch number (for resuming)
         """
         print(f"\n========== START {stage_name} ==========")
-        self.patience_counter = 0
-        self.best_score = -float('inf')
 
-        for epoch in range(num_epochs):
+        for epoch in range(start_epoch, num_epochs):
             self.model.train()
             total_loss = 0.0
             pbar = tqdm(self.dataloader, desc=f"{stage_name} Epoch {epoch+1}/{num_epochs}")
@@ -61,7 +128,7 @@ class Trainer:
                 self.optimizer.zero_grad()
                 u_ids, pos_ids, neg_ids = [x.to(Config.device) for x in batch]
                 
-                # CRITICAL FIX: Call model.forward() to compute embeddings with gradient
+                # CRITICAL: Call model.forward() to compute embeddings with gradient
                 # This ensures gradients flow back to GCN parameters
                 with autocast('cuda', enabled=self.use_amp):
                     loss = self.model(
@@ -100,17 +167,26 @@ class Trainer:
                 if recall > self.best_score:
                     self.best_score = recall
                     self.patience_counter = 0
-                    self.save_checkpoint(f"margo_best_stage{self.model.stage}.pth")
+                    self.save_checkpoint(
+                        f"margo_best_stage{self.model.stage}.pth",
+                        epoch=epoch + 1
+                    )
                     print("New best model saved!")
                 else:
                     self.patience_counter += 1
                     print(f"Patience: {self.patience_counter}/{self.patience_limit}")
                     if self.patience_counter >= self.patience_limit:
                         print("Early stopping triggered!")
-                        self.load_best_model(f"margo_best_stage{self.model.stage}.pth")
+                        self.load_checkpoint(
+                            f"margo_best_stage{self.model.stage}.pth",
+                            load_optimizer=True
+                        )
                         break
 
     def fit(self):
+        """
+        Complete training pipeline: Stage 1 (warm-up) then Stage 2 (fine-tuning).
+        """
         # Stage 1: Warm-up (modality weights frozen)
         self.model.stage = 1
         self.model.item_modality_weights.requires_grad = False
