@@ -18,7 +18,7 @@ class Config:
     if IS_KAGGLE:
         # Kaggle Paths (Read-only Input)
         # NOTE: Replace 'my-margo-data' with your actual Kaggle dataset name
-        base_dir = '/kaggle/input/movies-resys-cleaned' 
+        base_dir = '/kaggle/input/movies-resys-small'
         
         # Output (Writable): Checkpoints must be saved to /kaggle/working
         checkpoint_dir = '/kaggle/working/checkpoints'
