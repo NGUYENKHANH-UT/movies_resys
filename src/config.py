@@ -39,6 +39,12 @@ class Config:
     milvus_token = os.getenv('MILVUS_TOKEN')
     milvus_collection = 'movies_multimodal'
     
+    # --- redis / Upstash Config ---
+    redis_host = os.getenv('REDIS_HOST', 'localhost')
+    redis_port = int(os.getenv('REDIS_PORT', 6379))
+    redis_password = os.getenv('REDIS_PASSWORD', None)
+    redis_ssl = os.getenv('REDIS_SSL', 'False').lower() == 'true'
+    
     # Fallback for Local Docker (if environment variables are missing)
     milvus_host = 'localhost'
     milvus_port = '19530'
