@@ -148,7 +148,7 @@ class Trainer:
                 pbar.set_postfix({'loss': f"{loss.item():.6f}"})
                 
                 # Print progress every 200 batches
-                if (batch_idx + 1) % 200 == 0:
+                if (batch_idx + 1) % 100==0:
                     avg_loss = total_loss / (batch_idx + 1)
                     print(f"\nBatch {batch_idx+1}/{len(self.dataloader)} - Avg loss: {avg_loss:.6f}")
             

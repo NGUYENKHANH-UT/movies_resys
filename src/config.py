@@ -49,13 +49,13 @@ class Config:
     feat_dim_t = 768        # Text Vector Size (SBERT all-mpnet-base-v2)
     
     # --- Training Params ---
-    batch_size = 32768
+    batch_size = 8192
     lr = 1e-3
     weight_decay = 1e-4
     
     # Max epochs (Controlled by Early Stopping in Trainer)
     epochs_stage1 = 20      # Warm-up Stage
-    epochs_stage2 = 20      # Reliability Learning Stage
+    epochs_stage2 = 30     # Reliability Learning Stage
     
     # --- MARGO Specifics ---
     tau = 0.1               # Temperature (Sensitivity of Confidence function)
