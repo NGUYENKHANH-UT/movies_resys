@@ -18,7 +18,7 @@ class Trainer:
         
         # Unified mixed precision (PyTorch >= 2.0)
         self.scaler = GradScaler('cuda')
-        self.use_amp = True
+        self.use_amp = False
 
         # Early stopping based on Recall@20
         self.patience_limit = 5
