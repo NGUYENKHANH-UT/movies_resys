@@ -34,16 +34,12 @@ class Evaluator:
     def evaluate(self, k_list=[20]):
         self.model.eval()
         
-        # 1. Get All Final Embeddings (User & Item)
-        # feat_v, feat_t are from dataset (loaded from Milvus)
-        (u_v, u_t), (i_v, i_t) = self.model.get_final_embeddings(
+        # 1. Get All Final Embeddings (User Z_u & Item Z_i)
+        # DRAGON returns the single, fused, and propagated dual representations (Z_u, Z_i).
+        # FIX: Unpack directly into two tensors (z_u, z_i) instead of the nested tuple format used by MARGO.
+        z_u, z_i = self.model.get_final_embeddings(
             self.dataset.feat_v, self.dataset.feat_t
         )
-        
-        # Get Weights W for all items
-        all_weights = F.softmax(self.model.item_modality_weights, dim=1) # [N_items, 2]
-        w_v = all_weights[:, 0].unsqueeze(0) # [1, N_items]
-        w_t = all_weights[:, 1].unsqueeze(0)
         
         results = {f'Recall@{k}': 0.0 for k in k_list}
         results.update({f'NDCG@{k}': 0.0 for k in k_list})
@@ -58,21 +54,12 @@ class Evaluator:
                 batch_u_tensor = torch.tensor(batch_users).to(self.device)
                 
                 # --- A. Calculate Score Matrix (Full Ranking) ---
-                # Get user vectors for batch
-                batch_u_v = u_v[batch_u_tensor]
-                batch_u_t = u_t[batch_u_tensor]
+                # Get user vectors for batch (Z_u)
+                batch_z_u = z_u[batch_u_tensor]
                 
-                # Matrix Mult: User x Item^T
-                # [Batch, Dim] x [Dim, N_items] -> [Batch, N_items]
-                score_v = torch.matmul(batch_u_v, i_v.t())
-                score_t = torch.matmul(batch_u_t, i_t.t())
-                
-                # Fuse Scores
-                if self.model.stage == 1:
-                    batch_scores = score_v + score_t
-                else:
-                    # Broadcast item weights
-                    batch_scores = score_v * w_v + score_t * w_t
+                # Matrix Mult: User Z_u x Item Z_i^T
+                # [Batch, 2*Dim] x [2*Dim, N_items] -> [Batch, N_items]
+                batch_scores = torch.matmul(batch_z_u, z_i.t())
                 
                 # --- B. Masking (Hide trained items) ---
                 # Assign -inf to items present in training set

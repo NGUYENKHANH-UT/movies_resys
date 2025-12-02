@@ -72,6 +72,7 @@ class DRAGON(nn.Module):
             adj = torch.sparse_coo_tensor(indices, values, adj_dense.size()).coalesce()
             
             # D^-1 * A Normalization
+            # The original paper uses the normalized laplacian L=D^-1 * A, so we only need D^-1
             row_sum = torch.sparse.sum(adj, dim=1).to_dense()
             d_inv = torch.pow(row_sum, -1.0)
             d_inv[torch.isinf(d_inv)] = 0.
@@ -121,6 +122,7 @@ class DRAGON(nn.Module):
         """
         h_i = i_f
         for l in range(self.L_HOMO):
+            # Formula: h_i^(l+1) = Adj_norm * h_i^(l)
             h_i = torch.sparse.mm(isg_adj, h_i)
         
         return h_i # h_i^(L_HOMO)
@@ -146,6 +148,8 @@ class DRAGON(nn.Module):
         i_f = torch.cat([i_v_het, i_t_het], dim=1)
 
         # --- 3. HOMOGENEOUS GRAPHS (Dual Representation) ---
+        # Note: ISG Adj is re-calculated in each forward pass for consistency if features change, 
+        # but in this setup, since feat_v, feat_t are frozen, caching is possible if performance is an issue.
         isg_adj = self._create_item_semantic_adj(feat_v, feat_t)
         h_i_homo = self._propagate_isg(i_f, isg_adj)
         h_u_homo = self._propagate_ucg(u_f)
