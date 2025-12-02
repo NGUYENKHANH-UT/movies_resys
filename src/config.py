@@ -46,7 +46,7 @@ class Config:
     batch_size = 8192
     lr = 1e-4               # Learning rate (Commonly used for DRAGON)
     weight_decay = 1e-4     # L2 regularization weight (Commonly used for DRAGON)
-    epochs = 50         # Max epochs (Controlled by Early Stopping)
+    epochs = 20        # Max epochs (Controlled by Early Stopping)
     
     # --- DRAGON Specifics (From DRAGON Paper) ---
     L_HETERO = 2            # Layers for Heterogeneous Graph (LightGCN)
