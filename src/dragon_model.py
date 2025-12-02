@@ -168,7 +168,7 @@ class DRAGON(nn.Module):
         # Regularization (L2 on GCN Preferences and the Fusion Parameter)
         reg_loss = Config.weight_decay * (
             self.v_gcn.preference.pow(2).sum() + 
-            self_t_gcn.preference.pow(2).sum() +
+            self.t_gcn.preference.pow(2).sum() +
             self.user_v_alpha.pow(2).sum() # L2 on the learnable alpha
         ) / 2.0
         
@@ -183,7 +183,7 @@ class DRAGON(nn.Module):
         with torch.no_grad():
             # 1. HETEROGENEOUS GRAPH
             u_v_het, i_v_het = self.v_gcn(feat_v)
-            u_t_het, i_t_het = self_t_gcn(feat_t)
+            u_t_het, i_t_het = self.t_gcn(feat_t)
             
             # 2. MULTIMODAL FUSION
             alpha_v = torch.sigmoid(self.user_v_alpha)
