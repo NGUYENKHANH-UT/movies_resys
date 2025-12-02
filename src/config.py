@@ -16,7 +16,7 @@ class Config:
     # --- Paths ---
     if IS_KAGGLE:
         # Kaggle Paths
-        base_dir = '/kaggle/input/movies-resys-cleaned' 
+        base_dir = '/kaggle/input/movies-resys-small'
         checkpoint_dir = '/kaggle/working/checkpoints'
     else:
         # Local Machine Paths
