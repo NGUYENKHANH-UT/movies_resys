@@ -42,23 +42,31 @@ def main():
     print("\n[2/6] Initializing MARGO Model...")
     model = MARGO(dataset.num_users, dataset.num_items, dataset.edge_index).to(Config.device)
     
-    # 4. Load checkpoint
-    print("\n[3/6] Loading checkpoint...")
-    stage2_path = os.path.join(Config.checkpoint_dir, "margo_best_stage2.pth")
-    stage1_path = os.path.join(Config.checkpoint_dir, "margo_best_stage1.pth")
+    # 4. Configure Stage 2 FIRST (before creating trainer)
+    print("\n[3/6] Configuring Stage 2 mode...")
+    model.stage = 2
+    model.item_modality_weights.requires_grad = True
+    model.current_alpha = 0.0  # Will be updated by scheduler
+    print("Modality weights: UNFROZEN")
     
-    # Create trainer BEFORE loading checkpoint
+    # 5. Create Evaluator and Trainer
+    print("\n[4/6] Preparing trainer...")
     evaluator = Evaluator(dataset, model)
     trainer = Trainer(model, dataloader, evaluator)
     
-    start_epoch = 0  # Default starting epoch
+    # 6. Load checkpoint
+    print("\n[5/6] Loading checkpoint...")
+    stage2_path = os.path.join(Config.checkpoint_dir, "margo_best_stage2.pth")
+    stage1_path = os.path.join(Config.checkpoint_dir, "margo_best_stage1.pth")
     
-    # CASE 1: Resume Stage 2 (continue training from existing checkpoint)
+    start_epoch = 0
+    
+    # CASE 1: Resume Stage 2
     if os.path.exists(stage2_path):
         print("Found existing Stage 2 checkpoint - RESUMING training...")
         checkpoint = trainer.load_checkpoint(
             "margo_best_stage2.pth", 
-            load_optimizer=True  # Load optimizer state to resume properly
+            load_optimizer=True
         )
         start_epoch = checkpoint.get('epoch', 0)
         print(f"Resuming from epoch {start_epoch}")
@@ -69,26 +77,33 @@ def main():
     elif os.path.exists(stage1_path):
         print("Loading Stage 1 checkpoint - Starting Stage 2 FRESH...")
         
-        # Load ONLY model weights (do NOT load optimizer)
         checkpoint = torch.load(stage1_path, map_location=Config.device)
         if 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'])
+            # Load weights but skip optimizer/scheduler states
+            state_dict = checkpoint['model_state_dict']
+            model.load_state_dict(state_dict)
         else:
-            # Backward compatibility with old checkpoint format
             model.load_state_dict(checkpoint)
         
         print(f"Model weights loaded from: {stage1_path}")
         
-        # RESET all training states
         start_epoch = 0
         trainer.best_score = -float('inf')
         trainer.patience_counter = 0
-        # Note: Optimizer is already fresh from Trainer.__init__()
+        model.current_alpha = 0.0
         
-        print("Starting from epoch 0")
-        print("Optimizer: FRESH (new Adam instance)")
-        print("Best score: RESET to -inf")
-        print("Patience counter: RESET to 0")
+        # This ensures optimizer has correct parameter groups for Stage 2
+        trainer.setup_optimizer()
+        
+        print("\n" + "="*60)
+        print("STAGE 2 INITIALIZATION COMPLETE")
+        print("="*60)
+        print(f"Starting from epoch: 0")
+        print(f"Optimizer: FRESH (Stage 2 config)")
+        print(f"Best score: RESET to -inf")
+        print(f"Patience counter: RESET to 0")
+        print(f"Alpha: RESET to 0.0 (will warm up)")
+        print("="*60)
     
     else:
         raise FileNotFoundError(
@@ -96,34 +111,34 @@ def main():
             f"Please run train_stage1.py first."
         )
     
-    # 5. Configure Stage 2
-    print("\n[4/6] Configuring Stage 2 mode...")
-    model.stage = 2
-    model.item_modality_weights.requires_grad = True
-    print("Modality weights: UNFROZEN")
-    
-    # 6. Debug: Print training state
-    print("\n[5/6] Training state check...")
+    # 7. Debug: Print training state
+    print("\n[6/6] Training state verification...")
     print("-" * 60)
+    print(f"Model stage: {model.stage}")
     print(f"Start epoch: {start_epoch}")
     print(f"Best score: {trainer.best_score}")
     print(f"Patience counter: {trainer.patience_counter}")
-    print(f"Model stage: {model.stage}")
+    print(f"Current alpha: {model.current_alpha}")
     print(f"Modality weights grad: {model.item_modality_weights.requires_grad}")
     
-    # Check learning rate
+    # Check optimizer parameter groups
+    print(f"\nOptimizer parameter groups:")
     for i, param_group in enumerate(trainer.optimizer.param_groups):
-        print(f"Param group {i} LR: {param_group['lr']}")
+        n_params = len(param_group['params'])
+        lr = param_group['lr']
+        name = param_group.get('name', f'group_{i}')
+        print(f"  [{name}] {n_params} params, LR={lr}")
     
-    # Check optimizer state (momentum buffers)
-    if hasattr(trainer.optimizer.state, '__len__'):
-        print(f"Optimizer has state for {len(trainer.optimizer.state)} parameter groups")
+    # Check optimizer state
+    if hasattr(trainer.optimizer, 'state') and len(trainer.optimizer.state) > 0:
+        print(f"\nOptimizer has momentum/state for {len(trainer.optimizer.state)} parameters")
     else:
-        print("Optimizer state: EMPTY (fresh)")
+        print("\nOptimizer state: EMPTY (fresh start)")
+    
     print("-" * 60)
     
-    # 7. Train Stage 2
-    print("\n[6/6] Starting Stage 2 training...")
+    # 8. Train Stage 2
+    print("\nStarting Stage 2 training...")
     trainer.run_stage(
         "STAGE 2 (Fine-tune)", 
         Config.epochs_stage2, 
@@ -131,13 +146,14 @@ def main():
         start_epoch=start_epoch
     )
     
-    # 8. Save final checkpoint
+    # 9. Final summary
     print("\n" + "=" * 60)
     print("STAGE 2 COMPLETED")
     print("=" * 60)
     checkpoint_path = os.path.join(Config.checkpoint_dir, "margo_best_stage2.pth")
     if os.path.exists(checkpoint_path):
         print(f"Final model saved at: {checkpoint_path}")
+        print(f"Best Recall@20: {trainer.best_score:.5f}")
         print("\nNext step: Run test.py to evaluate the model")
     else:
         print("WARNING: Checkpoint not found!")
