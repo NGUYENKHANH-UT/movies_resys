@@ -5,17 +5,27 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Environment Detection (global) ---
-IS_KAGGLE_ENV = os.path.exists('/kaggle/input')
+RAW_IS_KAGGLE = (
+    "KAGGLE_KERNEL_RUN_TYPE" in os.environ
+    or "KAGGLE_URL_BASE" in os.environ
+)
 
-try:
-    import google.colab  # type: ignore
+# Colab detection
+RAW_IS_COLAB = (
+    'COLAB_RELEASE_TAG' in os.environ
+    or 'COLAB_GPU' in os.environ
+    or os.path.exists('/content/sample_data')
+)
+
+if RAW_IS_KAGGLE:
+    IS_KAGGLE_ENV = True
+    IS_COLAB_ENV = False
+elif RAW_IS_COLAB:
+    IS_KAGGLE_ENV = False
     IS_COLAB_ENV = True
-except Exception:
-    # fallback check env vars
-    IS_COLAB_ENV = (
-        'COLAB_RELEASE_TAG' in os.environ
-        or 'COLAB_GPU' in os.environ
-    )
+else:
+    IS_KAGGLE_ENV = False
+    IS_COLAB_ENV = False
 
 class Config:
     # --- System ---
