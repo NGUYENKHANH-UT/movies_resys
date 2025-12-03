@@ -24,7 +24,7 @@ class Trainer:
         self.use_amp = False
 
         # Early stopping parameters
-        self.patience_limit = 5
+        self.patience_limit = 10
         self.best_score = -float('inf')
         self.patience_counter = 0
         
