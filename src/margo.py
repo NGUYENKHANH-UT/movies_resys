@@ -73,31 +73,22 @@ class MARGO(nn.Module):
             diff_v = pos_score_v - neg_score_v
             diff_t = pos_score_t - neg_score_t
             
-            # --- CRITICAL FIX 1: Paper's g(x) function ---
-            # Paper Eq. (6): g(x) = x if x >= 0, else g(x) = -e^6 ≈ -403
-            # Ý nghĩa: Modality unreliable → logit rất âm → sau softmax ≈ 0
-            
-            # Nhưng -e^6 quá cực đoan! Dùng giá trị âm vừa phải:
-            neg_penalty = -5.0  # Modality xấu sẽ có weight thấp, không phải 0
+            # --- FIX 1: Đúng hàm g(x) từ paper ---
+            # Paper: g(x) = x if x >= 0, else g(x) = -e^6 ≈ -403
+            neg_penalty = -403.0  # DÙNG ĐÚNG GIÁ TRỊ PAPER
             
             z_v_logit = torch.where(diff_v > 0, diff_v, torch.full_like(diff_v, neg_penalty))
             z_t_logit = torch.where(diff_t > 0, diff_t, torch.full_like(diff_t, neg_penalty))
             
             # Softmax để tạo reliability vector
-            # Example: [2.0, -5.0] → softmax → [0.996, 0.004] (v very reliable)
-            # Example: [-5.0, -5.0] → softmax → [0.5, 0.5] (both bad, neutral)
             z = F.softmax(torch.stack([z_v_logit, z_t_logit], dim=1), dim=1).detach()
             
-            # --- CRITICAL FIX 2: Continuous confidence (KHÔNG dùng threshold!) ---
+            # --- FIX 2: Đúng công thức confidence từ paper ---
             # Paper Eq. (7): γ = tanh((y_ui - y_uk) / τ) if y_ui > y_uk, else 0
-            # 
-            # QUAN TRỌNG: γ = 0 khi prediction SAI (y_ui <= y_uk)
-            #             γ ∈ (0,1) khi prediction ĐÚNG (y_ui > y_uk)
-            
             score_diff = pos_score - neg_score
             
-            # Paper dùng tanh, nhưng sigmoid + clipping cũng tương đương
-            gamma = torch.sigmoid(score_diff / Config.tau)
+            # DÙNG TANH như paper, KHÔNG dùng sigmoid
+            gamma = torch.tanh(score_diff / Config.tau)
             
             # Set γ = 0 khi prediction sai (neg_score >= pos_score)
             gamma = torch.where(
@@ -106,34 +97,26 @@ class MARGO(nn.Module):
                 torch.zeros_like(gamma)
             ).detach()
             
-            # Clamp gamma to avoid extreme values
-            # Min = 0.05 để vẫn có gradient flow cho hard cases
-            # Max = 0.95 để tránh overconfident
-            gamma = torch.clamp(gamma, min=0.05, max=0.95)
+            # QUAN TRỌNG: KHÔNG clamp min! Để gamma tự nhiên (có thể rất nhỏ)
+            # gamma ∈ [0, ~0.76] với tanh và τ=1.0
             
-            # --- CRITICAL FIX 3: Average weights (w_i ⊕ w_k theo paper) ---
-            # Paper Eq. (8): w_i ⊕ w_k (element-wise sum, rồi normalize)
-            # Nhưng đơn giản hơn: dùng average
+            # --- FIX 3: Dùng JS Divergence thay vì KL để ổn định hơn ---
+            # KL không đối xứng, dễ gây instability
+            # Dùng Jensen-Shannon Divergence (đối xứng, bounded)
+            def js_divergence(p, q):
+                m = 0.5 * (p + q)
+                return 0.5 * (F.kl_div(p.log(), m, reduction='none').sum(dim=1) + 
+                              F.kl_div(q.log(), m, reduction='none').sum(dim=1))
+            
+            # Average weights như paper
             w_avg = (w_pos + w_neg) / 2.0
             
-            # --- CRITICAL FIX 4: KL Divergence đúng theo paper ---
-            # Forward KL: KL(z || w) = Σ z · log(z/w)
-            # Gradient: ∂KL/∂w = -z/w (pull w toward z)
-            epsilon = 1e-8
-            kl_div = torch.sum(
-                z * (torch.log(z + epsilon) - torch.log(w_avg + epsilon)), 
-                dim=1
-            )
+            js_div = js_divergence(z, w_avg)
             
-            # Clip KL để stability
-            kl_div = torch.clamp(kl_div, min=0.0, max=3.0)
-            
-            # --- CRITICAL FIX 5: Weighted average (KHÔNG filter samples!) ---
-            # Paper: L_cal = Σ γ · KL  (tất cả samples, không filter)
-            # Khi γ nhỏ (unreliable), supervision yếu
-            # Khi γ lớn (reliable), supervision mạnh
-            
-            cal_loss = torch.mean(gamma * kl_div)
+            # --- FIX 4: Normalize cal loss theo batch ---
+            # Paper: L_cal = Σ γ · KL  (weighted sum)
+            # Normalize bằng tổng gamma để ổn định
+            cal_loss = torch.sum(gamma * js_div) / (torch.sum(gamma) + 1e-8)
             
             loss = loss + self.current_alpha * cal_loss
             loss_dict['cal'] = cal_loss.item()
@@ -143,7 +126,12 @@ class MARGO(nn.Module):
             self.last_gamma_mean = gamma.mean().item()
             self.last_gamma_min = gamma.min().item()
             self.last_gamma_max = gamma.max().item()
-            self.last_kl_mean = kl_div.mean().item()
+            self.last_gamma_zero = (gamma == 0).float().mean().item()
+            self.last_kl_mean = js_div.mean().item()
+            
+            # Logging weights stats
+            self.last_weights_v_mean = w_pos[:, 0].mean().item()
+            self.last_weights_t_mean = w_pos[:, 1].mean().item()
         
         self.last_loss_dict = loss_dict
         return loss

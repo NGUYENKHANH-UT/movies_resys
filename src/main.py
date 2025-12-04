@@ -70,6 +70,7 @@ def main():
     print(f"  Alpha (Calibration): {Config.alpha_initial} → {Config.alpha_final}")
     print(f"  Alpha Warmup: {Config.alpha_warmup_epochs} epochs")
     print(f"  Tau (Confidence): {Config.tau}")
+    print(f"  Note: Using JS Divergence instead of KL for stability")
     print("-" * 60)
     
     # 6. Start Training Pipeline

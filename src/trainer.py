@@ -142,7 +142,10 @@ class Trainer:
             total_gamma_mean = 0.0
             total_gamma_min = 0.0
             total_gamma_max = 0.0
+            total_gamma_zero = 0.0
             total_kl_mean = 0.0
+            total_weights_v = 0.0
+            total_weights_t = 0.0
             
             pbar = tqdm(self.dataloader, desc=f"{stage_name} Epoch {epoch+1}/{num_epochs}")
 
@@ -177,7 +180,10 @@ class Trainer:
                     total_gamma_mean += self.model.last_gamma_mean
                     total_gamma_min += self.model.last_gamma_min
                     total_gamma_max += self.model.last_gamma_max
+                    total_gamma_zero += getattr(self.model, 'last_gamma_zero', 0.0)
                     total_kl_mean += self.model.last_kl_mean
+                    total_weights_v += getattr(self.model, 'last_weights_v_mean', 0.5)
+                    total_weights_t += getattr(self.model, 'last_weights_t_mean', 0.5)
                 
                 # Update progress bar
                 if self.model.stage == 2:
@@ -205,10 +211,14 @@ class Trainer:
                 avg_gamma_mean = total_gamma_mean / n_batches
                 avg_gamma_min = total_gamma_min / n_batches
                 avg_gamma_max = total_gamma_max / n_batches
+                avg_gamma_zero = total_gamma_zero / n_batches
                 avg_kl = total_kl_mean / n_batches
+                avg_weights_v = total_weights_v / n_batches
+                avg_weights_t = total_weights_t / n_batches
                 print(f"  Cal Loss:   {avg_cal:.6f}")
-                print(f"  KL Div:     {avg_kl:.6f} (avg raw KL before weighting)")
-                print(f"  Gamma:      min={avg_gamma_min:.4f}, avg={avg_gamma_mean:.4f}, max={avg_gamma_max:.4f}")
+                print(f"  JS Div:     {avg_kl:.6f} (avg raw JS divergence)")
+                print(f"  Gamma:      min={avg_gamma_min:.4f}, avg={avg_gamma_mean:.4f}, max={avg_gamma_max:.4f}, zeros={100*avg_gamma_zero:.1f}%")
+                print(f"  Weights:    V={avg_weights_v:.4f}, T={avg_weights_t:.4f}")
                 
             print(f"  Reg Loss:   {avg_reg:.6f}")
             print(f"{'='*60}")

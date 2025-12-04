@@ -84,11 +84,10 @@ class Config:
     epochs_stage2 = 30
     
     # --- MARGO Specifics (FINAL OPTIMIZED) ---
-    tau = 1.0                     # GIẢM: 2.0 → 1.0 (more sensitive, chuẩn theo paper)
+    tau = 2.0                     # TĂNG: 1.0 → 2.0 (less sensitive, ổn định hơn)
     alpha_initial = 0.0
-    alpha_final = 0.01            # TĂNG: 0.003 → 0.01 (stronger supervision như paper)
-    alpha_warmup_epochs = 10      # GIẢM: 15 → 10 (faster warmup)
+    alpha_final = 0.003           # GIẢM: 0.01 → 0.003 (nhẹ nhàng hơn, tránh overwhelm BPR loss)
+    alpha_warmup_epochs = 15      # TĂNG: 10 → 15 (chậm hơn để model thích nghi)
     grad_clip_norm = 1.0
     
     model_name = 'margo_best'
-    
