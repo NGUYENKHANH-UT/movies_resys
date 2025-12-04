@@ -75,7 +75,9 @@ class MARGO(nn.Module):
             
             # --- FIX 1: Đúng hàm g(x) từ paper ---
             # Paper: g(x) = x if x >= 0, else g(x) = -e^6 ≈ -403
-            neg_penalty = -403.0  # DÙNG ĐÚNG GIÁ TRỊ PAPER
+            # NHƯNG: -403 quá cực đoan, làm softmax bất ổn!
+            # Thay bằng -10 (vẫn đảm bảo unreliable → 0 sau softmax)
+            neg_penalty = -10.0
             
             z_v_logit = torch.where(diff_v > 0, diff_v, torch.full_like(diff_v, neg_penalty))
             z_t_logit = torch.where(diff_t > 0, diff_t, torch.full_like(diff_t, neg_penalty))
@@ -83,11 +85,10 @@ class MARGO(nn.Module):
             # Softmax để tạo reliability vector
             z = F.softmax(torch.stack([z_v_logit, z_t_logit], dim=1), dim=1).detach()
             
-            # --- FIX 2: Đúng công thức confidence từ paper ---
-            # Paper Eq. (7): γ = tanh((y_ui - y_uk) / τ) if y_ui > y_uk, else 0
+            # --- FIX 2: Confidence với tanh ---
             score_diff = pos_score - neg_score
             
-            # DÙNG TANH như paper, KHÔNG dùng sigmoid
+            # Dùng tanh như paper
             gamma = torch.tanh(score_diff / Config.tau)
             
             # Set γ = 0 khi prediction sai (neg_score >= pos_score)
@@ -97,26 +98,47 @@ class MARGO(nn.Module):
                 torch.zeros_like(gamma)
             ).detach()
             
-            # QUAN TRỌNG: KHÔNG clamp min! Để gamma tự nhiên (có thể rất nhỏ)
-            # gamma ∈ [0, ~0.76] với tanh và τ=1.0
-            
-            # --- FIX 3: Dùng JS Divergence thay vì KL để ổn định hơn ---
-            # KL không đối xứng, dễ gây instability
-            # Dùng Jensen-Shannon Divergence (đối xứng, bounded)
-            def js_divergence(p, q):
-                m = 0.5 * (p + q)
-                return 0.5 * (F.kl_div(p.log(), m, reduction='none').sum(dim=1) + 
-                              F.kl_div(q.log(), m, reduction='none').sum(dim=1))
+            # --- FIX QUAN TRỌNG 3: JS Divergence ĐƠN GIẢN và ỔN ĐỊNH ---
+            # Đừng dùng F.kl_div() vì nó không ổn định với reduction='none'
+            # Thay bằng công thức tính JS Divergence trực tiếp
             
             # Average weights như paper
             w_avg = (w_pos + w_neg) / 2.0
             
-            js_div = js_divergence(z, w_avg)
+            # Tính JS Divergence một cách ổn định
+            # JS(P||Q) = 0.5 * [KL(P||M) + KL(Q||M)], M = (P+Q)/2
+            # KL(P||M) = Σ P * log(P/M)
             
-            # --- FIX 4: Normalize cal loss theo batch ---
-            # Paper: L_cal = Σ γ · KL  (weighted sum)
-            # Normalize bằng tổng gamma để ổn định
-            cal_loss = torch.sum(gamma * js_div) / (torch.sum(gamma) + 1e-8)
+            epsilon = 1e-10
+            z_safe = z + epsilon
+            w_avg_safe = w_avg + epsilon
+            
+            # Tính M
+            M = 0.5 * (z_safe + w_avg_safe)
+            
+            # Tính KL divergences
+            kl_z = (z_safe * (torch.log(z_safe) - torch.log(M))).sum(dim=1)
+            kl_w = (w_avg_safe * (torch.log(w_avg_safe) - torch.log(M))).sum(dim=1)
+            
+            # JS Divergence
+            js_div = 0.5 * (kl_z + kl_w)
+            
+            # Clamp để ổn định (JS divergence luôn ≤ log(2) ≈ 0.693)
+            js_div = torch.clamp(js_div, min=0.0, max=1.0)
+            
+            # --- FIX 4: Cal loss với normalization an toàn ---
+            # Chỉ tính cal loss khi có ít nhất một gamma > 0
+            valid_gamma_mask = gamma > 0
+            if valid_gamma_mask.any():
+                # Chỉ lấy các samples có gamma > 0
+                valid_gamma = gamma[valid_gamma_mask]
+                valid_js = js_div[valid_gamma_mask]
+                
+                # Weighted average
+                cal_loss = torch.sum(valid_gamma * valid_js) / (torch.sum(valid_gamma) + epsilon)
+            else:
+                # Không có sample nào valid
+                cal_loss = torch.tensor(0.0).to(self.device)
             
             loss = loss + self.current_alpha * cal_loss
             loss_dict['cal'] = cal_loss.item()
