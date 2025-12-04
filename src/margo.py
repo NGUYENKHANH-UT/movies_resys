@@ -73,43 +73,64 @@ class MARGO(nn.Module):
             diff_v = pos_score_v - neg_score_v
             diff_t = pos_score_t - neg_score_t
             
-            # --- FIXED LOGIC: Áp dụng mapping function g() như paper ---
-            # Paper: g(x) = x if x >= 0, else g(x) = -e^6 (một giá trị nhỏ cố định)
-            # Chúng ta dùng một giá trị nhỏ hợp lý thay vì -inf
-            
-            small_negative = -10.0  # Thay vì -1e9, dùng giá trị nhỏ hợp lý hơn
-            
-            z_v_logit = torch.where(diff_v > 0, diff_v, torch.full_like(diff_v, small_negative))
-            z_t_logit = torch.where(diff_t > 0, diff_t, torch.full_like(diff_t, small_negative))
+            # --- FIX 1: Soft mapping thay vì hard threshold ---
+            # Thay vì dùng threshold cứng, dùng ReLU + small positive bias
+            # Cho phép gradient flow tốt hơn và tránh zero gradient
+            z_v_logit = F.relu(diff_v) + 0.1  # Bias nhỏ để tránh zero
+            z_t_logit = F.relu(diff_t) + 0.1
             
             # Softmax để tạo reliability vector
-            # Khi cả 2 đều < 0: softmax([-10, -10]) ≈ [0.5, 0.5]
-            # Khi 1 tốt, 1 xấu: softmax([2.0, -10]) ≈ [1.0, 0.0]
+            # Khi cả 2 đều xấu: [0.1, 0.1] → softmax → [0.5, 0.5] (fair)
+            # Khi v tốt, t xấu: [2.1, 0.1] → softmax → [0.89, 0.11] (v reliable)
             z = F.softmax(torch.stack([z_v_logit, z_t_logit], dim=1), dim=1).detach()
             
-            # Confidence gamma: Sử dụng final score difference
-            score_diff = torch.clamp(pos_score - neg_score, min=-5.0, max=5.0)
-            gamma = torch.sigmoid(score_diff / Config.tau).detach()
-            gamma = torch.clamp(gamma, min=0.01, max=0.99)
+            # --- FIX 2: Confidence mechanism cải thiện ---
+            # Paper dùng sigmoid, nhưng ở early epochs score_diff còn nhỏ
+            # → gamma ≈ 0.5 → supervision quá mạnh cho unreliable predictions
+            # Solution: Chỉ supervise khi score_diff > threshold
+            score_diff = pos_score - neg_score  # Không clamp quá sớm
+            
+            # Tính raw confidence
+            gamma_raw = torch.sigmoid(score_diff / Config.tau)
+            
+            # CRITICAL: Chỉ supervise predictions có confidence cao (> 0.6)
+            # Với tau=1.0, điều này tương đương score_diff > 0.4
+            confidence_threshold = 0.6
+            gamma = torch.where(
+                gamma_raw > confidence_threshold,
+                gamma_raw,
+                torch.zeros_like(gamma_raw)
+            ).detach()
             
             # Average weights của pos và neg items
             w_avg = (w_pos + w_neg) / 2.0
             
-            # KL Divergence: z là target, w_avg là prediction
+            # --- FIX 3: KL Divergence với clipping hợp lý ---
             epsilon = 1e-8
             kl_div = torch.sum(
                 z * (torch.log(z + epsilon) - torch.log(w_avg + epsilon)), 
                 dim=1
             )
             
-            # Clip KL để tránh exploding
-            kl_div = torch.clamp(kl_div, min=0.0, max=10.0)
+            # Clip KL nhưng không quá aggressive
+            kl_div = torch.clamp(kl_div, min=0.0, max=5.0)  # Giảm từ 10.0 xuống 5.0
             
-            cal_loss = torch.mean(gamma * kl_div)
+            # --- FIX 4: Chỉ tính loss trên samples có confidence > 0 ---
+            # Tránh supervise những triplets không confident
+            valid_mask = (gamma > 0).float()
+            
+            if valid_mask.sum() > 0:  # Có ít nhất 1 confident sample
+                cal_loss = torch.sum(gamma * kl_div) / (valid_mask.sum() + epsilon)
+            else:
+                cal_loss = torch.tensor(0.0).to(self.device)
             
             loss = loss + self.current_alpha * cal_loss
             loss_dict['cal'] = cal_loss.item()
             loss_dict['total'] = loss.item()
+            
+            # Logging để debug
+            self.last_gamma_mean = gamma.mean().item()
+            self.last_valid_ratio = valid_mask.mean().item()
         
         self.last_loss_dict = loss_dict
         return loss

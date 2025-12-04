@@ -10,7 +10,6 @@ RAW_IS_KAGGLE = (
     or "KAGGLE_URL_BASE" in os.environ
 )
 
-# Colab detection
 RAW_IS_COLAB = (
     'COLAB_RELEASE_TAG' in os.environ
     or 'COLAB_GPU' in os.environ
@@ -41,7 +40,6 @@ class Config:
         base_dir = '/kaggle/input/movies-resys-cleaned'
         checkpoint_dir = '/kaggle/working/checkpoints'
     elif IS_COLAB:
-        # Bạn sẽ download dataset vào đây
         base_dir = '/content/movies-resys-cleaned'
         checkpoint_dir = '/content/checkpoints'
     else:
@@ -77,19 +75,20 @@ class Config:
     # --- Training Params ---
     batch_size = 4096
     
-    lr_stage1 = 1e-3        # Stage 1: Higher LR for cold start
-    lr_stage2 = 1e-4        # Stage 2: Lower LR for fine-tuning
-    lr_modality_weights = 1e-4
+    lr_stage1 = 1e-3              # Stage 1: Higher LR for cold start
+    lr_stage2 = 1e-4              # Stage 2: Lower LR for fine-tuning GCN
+    lr_modality_weights = 5e-5    # GIẢM: LR cho weights (từ 1e-4 → 5e-5)
     weight_decay = 1e-4
     
     epochs_stage1 = 20
     epochs_stage2 = 30
     
-    # --- MARGO Specifics ---
-    tau = 1.0
+    # --- MARGO Specifics (OPTIMIZED) ---
+    tau = 2.0                     # TĂNG: Từ 1.0 → 2.0 (less sensitive confidence)
     alpha_initial = 0.0
-    alpha_final = 0.005
-    alpha_warmup_epochs = 10
+    alpha_final = 0.003           # GIẢM: Từ 0.005 → 0.003 (gentler supervision)
+    alpha_warmup_epochs = 15      # TĂNG: Từ 10 → 15 (slower warmup)
     grad_clip_norm = 1.0
     
     model_name = 'margo_best'
+    

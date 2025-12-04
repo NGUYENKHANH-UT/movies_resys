@@ -15,7 +15,6 @@ class Trainer:
         self.dataloader = dataloader
         self.evaluator = evaluator
         
-        # This will be set up in setup_optimizer()
         self.optimizer = None
         self.setup_optimizer()
         
@@ -31,19 +30,15 @@ class Trainer:
         print(f"Trainer initialized with patience={self.patience_limit}")
 
     def setup_optimizer(self):
-        """
-        Setup optimizer with different LRs for different stages
-        """
+        """Setup optimizer with different LRs for different stages"""
         if self.model.stage == 1:
-            # Stage 1: Only optimize GCN parameters (weights are frozen)
             self.optimizer = optim.Adam(
                 [p for p in self.model.parameters() if p.requires_grad],
                 lr=Config.lr_stage1,
-                weight_decay=0  # We handle L2 manually
+                weight_decay=0
             )
             print(f"Stage 1 Optimizer: Adam(lr={Config.lr_stage1})")
         else:
-            # Stage 2: Separate LR for modality weights and GCN
             param_groups = [
                 {
                     'params': [self.model.item_modality_weights],
@@ -86,7 +81,6 @@ class Trainer:
         
         checkpoint = torch.load(path, map_location=Config.device)
         
-        # Always load model weights
         if 'model_state_dict' in checkpoint:
             self.model.load_state_dict(checkpoint['model_state_dict'])
         else:
@@ -118,22 +112,17 @@ class Trainer:
             return None
 
     def get_alpha_for_epoch(self, epoch):
-        """
-        Alpha scheduler - gradually increase calibration loss weight
-        """
+        """Alpha scheduler - gradually increase calibration loss weight"""
         if self.model.stage == 1:
             return 0.0
         
         if epoch < Config.alpha_warmup_epochs:
-            # Linear warmup from 0 to alpha_final
             return Config.alpha_initial + (Config.alpha_final - Config.alpha_initial) * (epoch / Config.alpha_warmup_epochs)
         else:
             return Config.alpha_final
 
     def run_stage(self, stage_name, num_epochs, early_stopping=True, start_epoch=0):
-        """
-        Train the model for one stage with improved logging
-        """
+        """Train the model for one stage with improved logging"""
         print(f"\n{'='*60}")
         print(f"START {stage_name}")
         print(f"{'='*60}")
@@ -145,10 +134,13 @@ class Trainer:
             
             self.model.train()
             total_loss = 0.0
-            
             total_bpr = 0.0
             total_cal = 0.0
             total_reg = 0.0
+            
+            # Stage 2 specific metrics
+            total_gamma_mean = 0.0
+            total_valid_ratio = 0.0
             
             pbar = tqdm(self.dataloader, desc=f"{stage_name} Epoch {epoch+1}/{num_epochs}")
 
@@ -167,19 +159,6 @@ class Trainer:
                 self.scaler.scale(loss).backward()
                 self.scaler.unscale_(self.optimizer)
                 
-                if batch_idx % 500 == 0 and self.model.stage == 2:
-                    weight_grad = self.model.item_modality_weights.grad
-                    if weight_grad is not None:
-                        weight_grad_norm = weight_grad.norm().item()
-                    else:
-                        weight_grad_norm = 0.0
-                    
-                    gcn_grads = [p.grad.norm().item() for p in self.model.v_gcn.parameters() if p.grad is not None]
-                    gcn_grad_norm = sum(gcn_grads) / len(gcn_grads) if gcn_grads else 0.0
-                    
-                    if batch_idx == 0:
-                        print(f"\n  Gradient norms: Weights={weight_grad_norm:.6f}, GCN={gcn_grad_norm:.6f}")
-                
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=Config.grad_clip_norm)
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
@@ -191,7 +170,12 @@ class Trainer:
                     total_cal += self.model.last_loss_dict['cal']
                     total_reg += self.model.last_loss_dict['reg']
                 
-                # Update progress bar with individual components
+                # Stage 2: Track gamma and valid ratio
+                if self.model.stage == 2 and hasattr(self.model, 'last_gamma_mean'):
+                    total_gamma_mean += self.model.last_gamma_mean
+                    total_valid_ratio += self.model.last_valid_ratio
+                
+                # Update progress bar
                 if self.model.stage == 2:
                     pbar.set_postfix({
                         'loss': f"{loss.item():.4f}",
@@ -200,15 +184,6 @@ class Trainer:
                     })
                 else:
                     pbar.set_postfix({'loss': f"{loss.item():.4f}"})
-                    
-                if batch_idx % 100 == 0 and self.model.stage == 2:
-                    weight_grad_norm = self.model.item_modality_weights.grad.norm().item()
-                    print(f"Weight grad norm: {weight_grad_norm:.6f}")
-                    
-                    # Kiểm tra distribution của z
-                    if hasattr(self.model, 'last_z'):
-                        z_mean = self.model.last_z.mean(dim=0)
-                        print(f"Z distribution: {z_mean}")
             
             # End of epoch statistics
             n_batches = len(self.dataloader)
@@ -221,8 +196,14 @@ class Trainer:
             print(f"Epoch {epoch+1} Summary:")
             print(f"  Total Loss: {avg_loss:.6f}")
             print(f"  BPR Loss:   {avg_bpr:.6f}")
+            
             if self.model.stage == 2:
+                avg_gamma = total_gamma_mean / n_batches
+                avg_valid = total_valid_ratio / n_batches
                 print(f"  Cal Loss:   {avg_cal:.6f}")
+                print(f"  Avg Gamma:  {avg_gamma:.6f} (Avg confidence)")
+                print(f"  Valid %:    {avg_valid*100:.2f}% (% samples supervised)")
+                
             print(f"  Reg Loss:   {avg_reg:.6f}")
             print(f"{'='*60}")
             
@@ -242,12 +223,12 @@ class Trainer:
                         f"margo_best_stage{self.model.stage}.pth",
                         epoch=epoch + 1
                     )
-                    print(f"New best model! Improvement: +{improvement:.5f}")
+                    print(f"✓ New best model! Improvement: +{improvement:.5f}")
                 else:
                     self.patience_counter += 1
                     print(f"Patience: {self.patience_counter}/{self.patience_limit}")
                     if self.patience_counter >= self.patience_limit:
-                        print("\nEarly stopping triggered!")
+                        print("\n⚠ Early stopping triggered!")
                         self.load_checkpoint(
                             f"margo_best_stage{self.model.stage}.pth",
                             load_optimizer=True
@@ -255,13 +236,11 @@ class Trainer:
                         break
 
     def fit(self):
-        """
-        Complete training pipeline: Stage 1 then Stage 2
-        """
+        """Complete training pipeline: Stage 1 then Stage 2"""
         # Stage 1
         self.model.stage = 1
         self.model.item_modality_weights.requires_grad = False
-        self.setup_optimizer()  # Setup fresh optimizer for Stage 1
+        self.setup_optimizer()
         self.run_stage("STAGE 1 (Warm-up)", Config.epochs_stage1)
 
         print("\n" + "="*60)
@@ -274,5 +253,5 @@ class Trainer:
         # Stage 2
         self.model.stage = 2
         self.model.item_modality_weights.requires_grad = True
-        self.setup_optimizer()  # Setup NEW optimizer with separate LRs
+        self.setup_optimizer()
         self.run_stage("STAGE 2 (Fine-tune)", Config.epochs_stage2)
