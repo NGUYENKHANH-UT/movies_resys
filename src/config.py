@@ -77,17 +77,17 @@ class Config:
     
     lr_stage1 = 1e-3              # Stage 1: Higher LR for cold start
     lr_stage2 = 1e-4              # Stage 2: Lower LR for fine-tuning GCN
-    lr_modality_weights = 5e-5    # GIẢM: LR cho weights (từ 1e-4 → 5e-5)
+    lr_modality_weights = 1e-4    # GIẢM: LR cho weights (từ 1e-4 → 5e-5)
     weight_decay = 1e-4
     
     epochs_stage1 = 20
     epochs_stage2 = 30
     
-    # --- MARGO Specifics (FINAL OPTIMIZED) ---
-    tau = 2.0                     # Giữ nguyên
+    # --- MARGO Specifics (TỐI ƯU) ---
+    tau = 1.0                     # GIẢM: 2.0 → 1.0 (gamma nhạy cảm hơn)
     alpha_initial = 0.0
-    alpha_final = 0.01           # TĂNG LÊN: 0.003 → 0.01 (vì cal loss đã ổn định)
-    alpha_warmup_epochs = 10     # GIẢM XUỐNG: 15 → 10
+    alpha_final = 0.02           # TĂNG: 0.01 → 0.02 (cal loss mạnh hơn)
+    alpha_warmup_epochs = 8      # GIẢM: 10 → 8 (warmup nhanh hơn)
     grad_clip_norm = 1.0
     
     model_name = 'margo_best'

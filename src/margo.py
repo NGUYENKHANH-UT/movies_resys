@@ -15,7 +15,8 @@ class MARGO(nn.Module):
         self.t_gcn = DragonGCN(num_users, num_items, Config.feat_dim_t, Config.embed_dim, edge_index, self.device)
         
         # --- MARGO PARAMETERS ---
-        init_weights = torch.ones(num_items, 2) * 0.5 
+        # Khởi tạo weights với nhiễu nhỏ để break symmetry
+        init_weights = torch.ones(num_items, 2) * 0.5 + torch.randn(num_items, 2) * 0.1
         self.item_modality_weights = nn.Parameter(init_weights.to(self.device))
         
         self.stage = 1
@@ -73,87 +74,76 @@ class MARGO(nn.Module):
             diff_v = pos_score_v - neg_score_v
             diff_t = pos_score_t - neg_score_t
             
-            # --- FIX 1: Đúng hàm g(x) từ paper ---
-            # Paper: g(x) = x if x >= 0, else g(x) = -e^6 ≈ -403
-            # NHƯNG: -403 quá cực đoan, làm softmax bất ổn!
-            # Thay bằng -10 (vẫn đảm bảo unreliable → 0 sau softmax)
-            neg_penalty = -10.0
+            # --- FIX QUAN TRỌNG: Reliability vector tính toán mới ---
+            # 1. Chuẩn hóa differences
+            diff_v_norm = diff_v / (torch.std(diff_v) + 1e-8)
+            diff_t_norm = diff_t / (torch.std(diff_t) + 1e-8)
             
-            z_v_logit = torch.where(diff_v > 0, diff_v, torch.full_like(diff_v, neg_penalty))
-            z_t_logit = torch.where(diff_t > 0, diff_t, torch.full_like(diff_t, neg_penalty))
+            # 2. Hàm g(x) cải tiến: giảm ảnh hưởng của unreliable modality
+            #    nhưng vẫn giữ gradient
+            neg_scale = 0.2  # Unreliable modality chỉ có 20% ảnh hưởng
+            z_v_logit = torch.where(diff_v_norm > 0, diff_v_norm, diff_v_norm * neg_scale)
+            z_t_logit = torch.where(diff_t_norm > 0, diff_t_norm, diff_t_norm * neg_scale)
             
-            # Softmax để tạo reliability vector
-            z = F.softmax(torch.stack([z_v_logit, z_t_logit], dim=1), dim=1).detach()
+            # 3. Softmax với temperature
+            temperature = 0.7
+            z = F.softmax(torch.stack([z_v_logit, z_t_logit], dim=1) / temperature, dim=1).detach()
             
-            # --- FIX 2: Confidence với tanh ---
+            # --- FIX: Gamma function mạnh mẽ hơn ---
             score_diff = pos_score - neg_score
             
-            # Dùng tanh như paper
-            gamma = torch.tanh(score_diff / Config.tau)
+            # Sigmoid với shift để gamma không luôn cao
+            # score_diff cần > 1.0 để gamma > 0.5
+            gamma = torch.sigmoid((score_diff - 1.0) / Config.tau)
+            gamma = torch.where(score_diff > 0, gamma, torch.zeros_like(gamma)).detach()
             
-            # Set γ = 0 khi prediction sai (neg_score >= pos_score)
-            gamma = torch.where(
-                score_diff > 0,
-                gamma,
-                torch.zeros_like(gamma)
-            ).detach()
+            # Clamp gamma để đảm bảo gradient ổn định
+            gamma = torch.clamp(gamma, min=0.1, max=0.9)
             
-            # --- FIX QUAN TRỌNG 3: JS Divergence ĐƠN GIẢN và ỔN ĐỊNH ---
-            # Đừng dùng F.kl_div() vì nó không ổn định với reduction='none'
-            # Thay bằng công thức tính JS Divergence trực tiếp
-            
-            # Average weights như paper
+            # --- JS Divergence tính toán ---
             w_avg = (w_pos + w_neg) / 2.0
-            
-            # Tính JS Divergence một cách ổn định
-            # JS(P||Q) = 0.5 * [KL(P||M) + KL(Q||M)], M = (P+Q)/2
-            # KL(P||M) = Σ P * log(P/M)
             
             epsilon = 1e-10
             z_safe = z + epsilon
-            w_avg_safe = w_avg + epsilon
+            w_safe = w_avg + epsilon
             
-            # Tính M
-            M = 0.5 * (z_safe + w_avg_safe)
-            
-            # Tính KL divergences
+            # Tính JS Divergence
+            M = 0.5 * (z_safe + w_safe)
             kl_z = (z_safe * (torch.log(z_safe) - torch.log(M))).sum(dim=1)
-            kl_w = (w_avg_safe * (torch.log(w_avg_safe) - torch.log(M))).sum(dim=1)
-            
-            # JS Divergence
+            kl_w = (w_safe * (torch.log(w_safe) - torch.log(M))).sum(dim=1)
             js_div = 0.5 * (kl_z + kl_w)
-            
-            # Clamp để ổn định (JS divergence luôn ≤ log(2) ≈ 0.693)
             js_div = torch.clamp(js_div, min=0.0, max=1.0)
             
-            # --- FIX 4: Cal loss với normalization an toàn ---
-            # Chỉ tính cal loss khi có ít nhất một gamma > 0
-            valid_gamma_mask = gamma > 0
+            # --- Thêm entropy regularization ---
+            # Khuyến khích weights không quá tập trung hay quá phân tán
+            weight_entropy = - (w_avg * torch.log(w_avg + epsilon)).sum(dim=1).mean()
+            entropy_loss = 0.005 * weight_entropy
+            
+            # --- Cal loss với valid samples ---
+            valid_gamma_mask = gamma > 0.1  # Chỉ samples với gamma đủ lớn
             if valid_gamma_mask.any():
-                # Chỉ lấy các samples có gamma > 0
                 valid_gamma = gamma[valid_gamma_mask]
                 valid_js = js_div[valid_gamma_mask]
-                
-                # Weighted average
                 cal_loss = torch.sum(valid_gamma * valid_js) / (torch.sum(valid_gamma) + epsilon)
+                cal_loss = cal_loss + entropy_loss
             else:
-                # Không có sample nào valid
                 cal_loss = torch.tensor(0.0).to(self.device)
             
             loss = loss + self.current_alpha * cal_loss
             loss_dict['cal'] = cal_loss.item()
             loss_dict['total'] = loss.item()
             
-            # Logging để debug
+            # Logging
             self.last_gamma_mean = gamma.mean().item()
             self.last_gamma_min = gamma.min().item()
             self.last_gamma_max = gamma.max().item()
-            self.last_gamma_zero = (gamma == 0).float().mean().item()
+            self.last_gamma_zero = (gamma < 0.1).float().mean().item()  # gamma rất nhỏ
             self.last_kl_mean = js_div.mean().item()
             
-            # Logging weights stats
+            # Weights stats
             self.last_weights_v_mean = w_pos[:, 0].mean().item()
             self.last_weights_t_mean = w_pos[:, 1].mean().item()
+            self.last_weights_std = w_pos.std(dim=0).mean().item()  # Độ phân tán của weights
         
         self.last_loss_dict = loss_dict
         return loss
