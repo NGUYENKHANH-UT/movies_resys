@@ -200,6 +200,15 @@ class Trainer:
                     })
                 else:
                     pbar.set_postfix({'loss': f"{loss.item():.4f}"})
+                    
+                if batch_idx % 100 == 0 and self.model.stage == 2:
+                    weight_grad_norm = self.model.item_modality_weights.grad.norm().item()
+                    print(f"Weight grad norm: {weight_grad_norm:.6f}")
+                    
+                    # Kiểm tra distribution của z
+                    if hasattr(self.model, 'last_z'):
+                        z_mean = self.model.last_z.mean(dim=0)
+                        print(f"Z distribution: {z_mean}")
             
             # End of epoch statistics
             n_batches = len(self.dataloader)

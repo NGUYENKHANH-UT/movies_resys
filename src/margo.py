@@ -73,36 +73,36 @@ class MARGO(nn.Module):
             diff_v = pos_score_v - neg_score_v
             diff_t = pos_score_t - neg_score_t
             
-            # --- FIX: LOGIC SỬA ĐỔI ---
-            # Thay vì ReLU, ta dùng mask. Nếu diff < 0 (unreliable), gán logit = -1e9
-            # Khi qua Softmax, e^(-1e9) -> 0. Modal tệ sẽ bị loại bỏ hoàn toàn.
+            # --- FIXED LOGIC: Áp dụng mapping function g() như paper ---
+            # Paper: g(x) = x if x >= 0, else g(x) = -e^6 (một giá trị nhỏ cố định)
+            # Chúng ta dùng một giá trị nhỏ hợp lý thay vì -inf
             
-            neg_inf = torch.tensor(-1e9).to(self.device)
+            small_negative = -10.0  # Thay vì -1e9, dùng giá trị nhỏ hợp lý hơn
             
-            z_v_logit = torch.where(diff_v > 0, diff_v, neg_inf)
-            z_t_logit = torch.where(diff_t > 0, diff_t, neg_inf)
+            z_v_logit = torch.where(diff_v > 0, diff_v, torch.full_like(diff_v, small_negative))
+            z_t_logit = torch.where(diff_t > 0, diff_t, torch.full_like(diff_t, small_negative))
             
-            # Trường hợp cả 2 đều tệ (<0), Softmax([-1e9, -1e9]) -> [0.5, 0.5] (Fair guess)
-            # Trường hợp 1 tốt (1.0), 1 tệ (-0.5) -> Softmax([1.0, -1e9]) -> [1.0, 0.0] (Đúng!)
-            
+            # Softmax để tạo reliability vector
+            # Khi cả 2 đều < 0: softmax([-10, -10]) ≈ [0.5, 0.5]
+            # Khi 1 tốt, 1 xấu: softmax([2.0, -10]) ≈ [1.0, 0.0]
             z = F.softmax(torch.stack([z_v_logit, z_t_logit], dim=1), dim=1).detach()
             
-            # ---------------------------
-            
-            # Confidence gamma
+            # Confidence gamma: Sử dụng final score difference
             score_diff = torch.clamp(pos_score - neg_score, min=-5.0, max=5.0)
             gamma = torch.sigmoid(score_diff / Config.tau).detach()
-            gamma = torch.clamp(gamma, min=0.01, max=0.99) # Nới rộng range một chút
+            gamma = torch.clamp(gamma, min=0.01, max=0.99)
             
+            # Average weights của pos và neg items
             w_avg = (w_pos + w_neg) / 2.0
             
+            # KL Divergence: z là target, w_avg là prediction
             epsilon = 1e-8
             kl_div = torch.sum(
                 z * (torch.log(z + epsilon) - torch.log(w_avg + epsilon)), 
                 dim=1
             )
             
-            # Clip KL to prevent spikes
+            # Clip KL để tránh exploding
             kl_div = torch.clamp(kl_div, min=0.0, max=10.0)
             
             cal_loss = torch.mean(gamma * kl_div)

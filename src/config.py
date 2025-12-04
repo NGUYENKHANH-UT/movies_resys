@@ -79,7 +79,7 @@ class Config:
     
     lr_stage1 = 1e-3        # Stage 1: Higher LR for cold start
     lr_stage2 = 1e-4        # Stage 2: Lower LR for fine-tuning
-    lr_modality_weights = 5e-4
+    lr_modality_weights = 1e-4
     weight_decay = 1e-4
     
     epochs_stage1 = 20
@@ -88,8 +88,8 @@ class Config:
     # --- MARGO Specifics ---
     tau = 1.0
     alpha_initial = 0.0
-    alpha_final = 0.01
-    alpha_warmup_epochs = 5
+    alpha_final = 0.005
+    alpha_warmup_epochs = 10
     grad_clip_norm = 1.0
     
     model_name = 'margo_best'
