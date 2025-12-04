@@ -4,18 +4,43 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+RAW_IS_KAGGLE = (
+    "KAGGLE_KERNEL_RUN_TYPE" in os.environ
+    or "KAGGLE_URL_BASE" in os.environ
+)
+
+RAW_IS_COLAB = (
+    'COLAB_RELEASE_TAG' in os.environ
+    or 'COLAB_GPU' in os.environ
+    or os.path.exists('/content/sample_data')
+)
+
+if RAW_IS_KAGGLE:
+    IS_KAGGLE_ENV = True
+    IS_COLAB_ENV = False
+elif RAW_IS_COLAB:
+    IS_KAGGLE_ENV = False
+    IS_COLAB_ENV = True
+else:
+    IS_KAGGLE_ENV = False
+    IS_COLAB_ENV = False
+
 class Config:
     # --- System ---
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     seed = 2024
     
-    # --- Environment Detection ---
-    IS_KAGGLE = os.path.exists('/kaggle/input')
+    # --- Environment Flags ---
+    IS_KAGGLE = IS_KAGGLE_ENV
+    IS_COLAB = IS_COLAB_ENV
     
     # --- Paths ---
     if IS_KAGGLE:
-        base_dir = '/kaggle/input/movies-resys-cleaned' 
+        base_dir = '/kaggle/input/movies-resys-cleaned'
         checkpoint_dir = '/kaggle/working/checkpoints'
+    elif IS_COLAB:
+        base_dir = '/content/movies-resys-cleaned'
+        checkpoint_dir = '/content/checkpoints'
     else:
         base_dir = './ml-20m-psm'
         checkpoint_dir = './checkpoints'
