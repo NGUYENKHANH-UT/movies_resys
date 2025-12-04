@@ -140,7 +140,9 @@ class Trainer:
             
             # Stage 2 specific metrics
             total_gamma_mean = 0.0
-            total_valid_ratio = 0.0
+            total_gamma_min = 0.0
+            total_gamma_max = 0.0
+            total_kl_mean = 0.0
             
             pbar = tqdm(self.dataloader, desc=f"{stage_name} Epoch {epoch+1}/{num_epochs}")
 
@@ -170,10 +172,12 @@ class Trainer:
                     total_cal += self.model.last_loss_dict['cal']
                     total_reg += self.model.last_loss_dict['reg']
                 
-                # Stage 2: Track gamma and valid ratio
+                # Stage 2: Track gamma and KL metrics
                 if self.model.stage == 2 and hasattr(self.model, 'last_gamma_mean'):
                     total_gamma_mean += self.model.last_gamma_mean
-                    total_valid_ratio += self.model.last_valid_ratio
+                    total_gamma_min += self.model.last_gamma_min
+                    total_gamma_max += self.model.last_gamma_max
+                    total_kl_mean += self.model.last_kl_mean
                 
                 # Update progress bar
                 if self.model.stage == 2:
@@ -198,11 +202,13 @@ class Trainer:
             print(f"  BPR Loss:   {avg_bpr:.6f}")
             
             if self.model.stage == 2:
-                avg_gamma = total_gamma_mean / n_batches
-                avg_valid = total_valid_ratio / n_batches
+                avg_gamma_mean = total_gamma_mean / n_batches
+                avg_gamma_min = total_gamma_min / n_batches
+                avg_gamma_max = total_gamma_max / n_batches
+                avg_kl = total_kl_mean / n_batches
                 print(f"  Cal Loss:   {avg_cal:.6f}")
-                print(f"  Avg Gamma:  {avg_gamma:.6f} (Avg confidence)")
-                print(f"  Valid %:    {avg_valid*100:.2f}% (% samples supervised)")
+                print(f"  KL Div:     {avg_kl:.6f} (avg raw KL before weighting)")
+                print(f"  Gamma:      min={avg_gamma_min:.4f}, avg={avg_gamma_mean:.4f}, max={avg_gamma_max:.4f}")
                 
             print(f"  Reg Loss:   {avg_reg:.6f}")
             print(f"{'='*60}")

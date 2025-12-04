@@ -80,14 +80,14 @@ class Config:
     lr_modality_weights = 5e-5    # GIẢM: LR cho weights (từ 1e-4 → 5e-5)
     weight_decay = 1e-4
     
-    epochs_stage1 = 30
+    epochs_stage1 = 20
     epochs_stage2 = 30
     
-    # --- MARGO Specifics (OPTIMIZED) ---
-    tau = 2.0                     # TĂNG: Từ 1.0 → 2.0 (less sensitive confidence)
+    # --- MARGO Specifics (FINAL OPTIMIZED) ---
+    tau = 1.0                     # GIẢM: 2.0 → 1.0 (more sensitive, chuẩn theo paper)
     alpha_initial = 0.0
-    alpha_final = 0.003           # GIẢM: Từ 0.005 → 0.003 (gentler supervision)
-    alpha_warmup_epochs = 15      # TĂNG: Từ 10 → 15 (slower warmup)
+    alpha_final = 0.01            # TĂNG: 0.003 → 0.01 (stronger supervision như paper)
+    alpha_warmup_epochs = 10      # GIẢM: 15 → 10 (faster warmup)
     grad_clip_norm = 1.0
     
     model_name = 'margo_best'
