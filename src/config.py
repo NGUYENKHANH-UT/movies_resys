@@ -80,7 +80,7 @@ class Config:
     lr_modality_weights = 5e-5    # GIẢM: LR cho weights (từ 1e-4 → 5e-5)
     weight_decay = 1e-4
     
-    epochs_stage1 = 20
+    epochs_stage1 = 30
     epochs_stage2 = 30
     
     # --- MARGO Specifics (OPTIMIZED) ---
