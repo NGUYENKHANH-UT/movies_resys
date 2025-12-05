@@ -16,6 +16,7 @@ class MARGO(nn.Module):
         
         # --- MARGO PARAMETERS ---
         # Khởi tạo weights với nhiễu nhỏ để break symmetry
+        # Ban đầu là ~0.5, sau đó sẽ tự học lệch đi tùy độ tin cậy
         init_weights = torch.ones(num_items, 2) * 0.5 + torch.randn(num_items, 2) * 0.1
         self.item_modality_weights = nn.Parameter(init_weights.to(self.device))
         
@@ -45,9 +46,11 @@ class MARGO(nn.Module):
         w_neg = F.softmax(self.item_modality_weights[neg_ids], dim=1)
         
         if self.stage == 1:
+            # Stage 1: Cộng gộp đơn giản, không dùng weights
             pos_score = pos_score_v + pos_score_t
             neg_score = neg_score_v + neg_score_t
         else:
+            # Stage 2: Dùng trọng số đã học để fuse
             pos_score = w_pos[:, 0] * pos_score_v + w_pos[:, 1] * pos_score_t
             neg_score = w_neg[:, 0] * neg_score_v + w_neg[:, 1] * neg_score_t
         
@@ -69,63 +72,60 @@ class MARGO(nn.Module):
             'cal': 0.0
         }
         
-        # Step 7: Calibration loss (Stage 2)
+        # Step 7: Calibration loss (Stage 2 ONLY)
         if self.stage == 2 and self.current_alpha > 0:
             diff_v = pos_score_v - neg_score_v
             diff_t = pos_score_t - neg_score_t
             
-            # --- FIX QUAN TRỌNG: Reliability vector tính toán mới ---
+            # --- Reliability Vector Calculation ---
             # 1. Chuẩn hóa differences
             diff_v_norm = diff_v / (torch.std(diff_v) + 1e-8)
             diff_t_norm = diff_t / (torch.std(diff_t) + 1e-8)
             
-            # 2. Hàm g(x) cải tiến: giảm ảnh hưởng của unreliable modality
-            #    nhưng vẫn giữ gradient
-            neg_scale = 0.2  # Unreliable modality chỉ có 20% ảnh hưởng
+            # 2. Hàm g(x): giảm ảnh hưởng của unreliable modality
+            neg_scale = 0.2
             z_v_logit = torch.where(diff_v_norm > 0, diff_v_norm, diff_v_norm * neg_scale)
             z_t_logit = torch.where(diff_t_norm > 0, diff_t_norm, diff_t_norm * neg_scale)
             
-            # 3. Softmax với temperature
+            # 3. Softmax để ra target distribution z
             temperature = 0.7
             z = F.softmax(torch.stack([z_v_logit, z_t_logit], dim=1) / temperature, dim=1).detach()
             
-            # --- FIX: Gamma function mạnh mẽ hơn ---
+            # --- Gamma (Confidence) Calculation ---
             score_diff = pos_score - neg_score
-            
-            # Sigmoid với shift để gamma không luôn cao
-            # score_diff cần > 1.0 để gamma > 0.5
+            # Sigmoid shifted: score_diff > 1.0 thì gamma mới > 0.5
             gamma = torch.sigmoid((score_diff - 1.0) / Config.tau)
+            # Chỉ tin tưởng những sample mà model dự đoán đúng (pos > neg)
             gamma = torch.where(score_diff > 0, gamma, torch.zeros_like(gamma)).detach()
-            
-            # Clamp gamma để đảm bảo gradient ổn định
             gamma = torch.clamp(gamma, min=0.1, max=0.9)
             
-            # --- JS Divergence tính toán ---
+            # --- JS Divergence Calculation ---
             w_avg = (w_pos + w_neg) / 2.0
-            
             epsilon = 1e-10
             z_safe = z + epsilon
             w_safe = w_avg + epsilon
             
-            # Tính JS Divergence
             M = 0.5 * (z_safe + w_safe)
             kl_z = (z_safe * (torch.log(z_safe) - torch.log(M))).sum(dim=1)
             kl_w = (w_safe * (torch.log(w_safe) - torch.log(M))).sum(dim=1)
             js_div = 0.5 * (kl_z + kl_w)
             js_div = torch.clamp(js_div, min=0.0, max=1.0)
             
-            # --- Thêm entropy regularization ---
-            # Khuyến khích weights không quá tập trung hay quá phân tán
-            weight_entropy = - (w_avg * torch.log(w_avg + epsilon)).sum(dim=1).mean()
-            entropy_loss = 0.005 * weight_entropy
+            # --- FIX QUAN TRỌNG: BỎ ENTROPY REGULARIZATION ---
+            # Phần này trước đây ép weights về 0.5, giờ bỏ đi để weights tự do phân cực
+            # weight_entropy = - (w_avg * torch.log(w_avg + epsilon)).sum(dim=1).mean()
+            # entropy_loss = 0.005 * weight_entropy
             
-            # --- Cal loss với valid samples ---
-            valid_gamma_mask = gamma > 0.1  # Chỉ samples với gamma đủ lớn
+            # --- Final Cal Loss ---
+            valid_gamma_mask = gamma > 0.1
             if valid_gamma_mask.any():
                 valid_gamma = gamma[valid_gamma_mask]
                 valid_js = js_div[valid_gamma_mask]
+                
+                # Loss = Trọng số Gamma * Độ lệch JS
                 cal_loss = torch.sum(valid_gamma * valid_js) / (torch.sum(valid_gamma) + epsilon)
-                cal_loss = cal_loss + entropy_loss
+                
+                # cal_loss = cal_loss + entropy_loss  <-- Đã bỏ
             else:
                 cal_loss = torch.tensor(0.0).to(self.device)
             
@@ -133,17 +133,16 @@ class MARGO(nn.Module):
             loss_dict['cal'] = cal_loss.item()
             loss_dict['total'] = loss.item()
             
-            # Logging
+            # --- Logging Stats ---
             self.last_gamma_mean = gamma.mean().item()
             self.last_gamma_min = gamma.min().item()
             self.last_gamma_max = gamma.max().item()
-            self.last_gamma_zero = (gamma < 0.1).float().mean().item()  # gamma rất nhỏ
+            self.last_gamma_zero = (gamma < 0.1).float().mean().item()
             self.last_kl_mean = js_div.mean().item()
             
-            # Weights stats
+            # Quan trọng: Theo dõi xem weights có lệch khỏi 0.5 không
             self.last_weights_v_mean = w_pos[:, 0].mean().item()
             self.last_weights_t_mean = w_pos[:, 1].mean().item()
-            self.last_weights_std = w_pos.std(dim=0).mean().item()  # Độ phân tán của weights
         
         self.last_loss_dict = loss_dict
         return loss
