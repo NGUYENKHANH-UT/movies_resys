@@ -37,7 +37,7 @@ class Config:
     
     # --- Paths ---
     if IS_KAGGLE:
-        base_dir = '/kaggle/input/movies-resys-small'
+        base_dir = '/kaggle/input/movies-resys-cleaned'
         checkpoint_dir = '/kaggle/working/checkpoints'
     elif IS_COLAB:
         base_dir = '/content/movies-resys-cleaned'
@@ -83,8 +83,8 @@ class Config:
     
     weight_decay = 1e-4
     
-    epochs_stage1 = 30
-    epochs_stage2 = 50
+    epochs_stage1 = 20
+    epochs_stage2 = 20
     
     # --- MARGO Specifics (TỐI ƯU) ---
     tau = 1.0                     # Giữ nguyên (đã tốt)
