@@ -73,7 +73,7 @@ class Config:
     feat_dim_t = 768
     
     # --- Training Params ---
-    batch_size = 4096
+    batch_size = 16384
     
     lr_stage1 = 1e-3              # Stage 1: Higher LR for cold start
     lr_stage2 = 1e-4              # Stage 2: Lower LR for fine-tuning GCN
