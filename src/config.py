@@ -83,8 +83,8 @@ class Config:
     
     weight_decay = 1e-4
     
-    epochs_stage1 = 20
-    epochs_stage2 = 30
+    epochs_stage1 = 30
+    epochs_stage2 = 50
     
     # --- MARGO Specifics (TỐI ƯU) ---
     tau = 1.0                     # Giữ nguyên (đã tốt)
