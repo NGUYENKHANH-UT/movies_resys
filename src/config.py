@@ -79,7 +79,7 @@ class Config:
     lr_stage2 = 1e-4              # Stage 2: Lower LR for fine-tuning GCN
     
     # --- CHANGE 1: Tăng LR cho weights để học nhanh hơn ---
-    lr_modality_weights = 0 # 1e-3    # TĂNG: 1e-4 -> 1e-3 (gấp 10 lần)
+    lr_modality_weights = 1e-3    # TĂNG: 1e-4 -> 1e-3 (gấp 10 lần)
     
     weight_decay = 1e-4
     
@@ -91,7 +91,7 @@ class Config:
     alpha_initial = 0.0
     
     # --- CHANGE 2: Tăng Alpha để Calibration Loss có trọng lượng hơn ---
-    alpha_final = 0 # 0.1             # TĂNG: 0.02 -> 0.1
+    alpha_final = 0.1             # TĂNG: 0.02 -> 0.1
     
     alpha_warmup_epochs = 8
     grad_clip_norm = 1.0
