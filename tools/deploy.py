@@ -107,55 +107,27 @@ def deploy_system():
         return
 
     # ---------------------------------------------------------
-    # 3. DEPLOY USERS TO UPSTASH (Query Cache)
+    # 3. DEPLOY USERS TO LOCAL STORAGE (Numpy Cache)
     # ---------------------------------------------------------
-    print("\n[3/3] Deploying Users to Upstash Redis...")
+    print("\n[3/3] Deploying Users to Local Numpy Cache...")
     
     try:
-        # Connect to Redis using Config
-        r = redis.Redis(
-            host=Config.redis_host,
-            port=Config.redis_port,
-            password=Config.redis_password,
-            ssl=Config.redis_ssl,
-            decode_responses=True
-        )
-        r.ping()
+        USER_VEC_PATH = os.path.join(Config.checkpoint_dir, "user_vectors.npy")
+        np.save(USER_VEC_PATH, final_users)
         
-        # Use Pipeline and MSET for batch processing
-        # This reduces the number of requests to fit within Free Tier limits
-        BATCH_SIZE = 50
-        batch_data = {}
-        total_requests = 0
-        
-        for internal_id, vec in tqdm(enumerate(final_users), total=len(final_users), desc="Caching Users"):
-            # Key format: "user:{id}"
-            # Note: We are using Internal ID here. 
-            # If your API receives Original UserID, you must map it to Internal ID first.
-            key = f"user:{internal_id}"
-            value = json.dumps(vec.tolist())
-            batch_data[key] = value
-            
-            # Send batch when full
-            if len(batch_data) >= BATCH_SIZE:
-                r.mset(batch_data)
-                batch_data = {}
-                total_requests += 1
-                
-        # Send remaining data
-        if batch_data:
-            r.mset(batch_data)
-            total_requests += 1
-            
-        print(f"Upstash: Cached {len(final_users)} users using {total_requests} requests.")
-        
+        USER_MAP_PATH = os.path.join(Config.checkpoint_dir, "user_map.json")
+        user_map_data = dataset.user2id 
+
+        with open(USER_MAP_PATH, 'w') as f:
+            json.dump(user_map_data, f)
+
     except Exception as e:
-        print(f"Redis Error: {e}")
+        print(f"Local Storage Error: {e}")
         return
 
     print("\n============================================================")
     print("DEPLOYMENT COMPLETED SUCCESSFULLY")
-    print("System is ready for inference.")
+    print("System is ready for inference (Using Local Numpy Cache).")
     print("============================================================")
 
 if __name__ == "__main__":
