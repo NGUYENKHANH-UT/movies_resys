@@ -116,11 +116,12 @@ def deploy_system():
         np.save(USER_VEC_PATH, final_users)
         
         USER_MAP_PATH = os.path.join(Config.checkpoint_dir, "user_map.json")
-        user_map_data = dataset.user2id 
+        
+        user_map_data = {str(k): v for k, v in dataset.user2id.items()} 
 
         with open(USER_MAP_PATH, 'w') as f:
             json.dump(user_map_data, f)
-
+            
     except Exception as e:
         print(f"Local Storage Error: {e}")
         return
