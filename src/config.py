@@ -83,8 +83,8 @@ class Config:
     
     weight_decay = 1e-4
     
-    epochs_stage1 = 20
-    epochs_stage2 = 20
+    epochs_stage1 = 50
+    epochs_stage2 = 50
     
     # --- MARGO Specifics (TỐI ƯU) ---
     tau = 1.0                     # Giữ nguyên (đã tốt)
@@ -93,7 +93,7 @@ class Config:
     # --- CHANGE 2: Tăng Alpha để Calibration Loss có trọng lượng hơn ---
     alpha_final = 0.1             # TĂNG: 0.02 -> 0.1
     
-    alpha_warmup_epochs = 8
+    alpha_warmup_epochs = 5
     grad_clip_norm = 1.0
     
     model_name = 'margo_best'
