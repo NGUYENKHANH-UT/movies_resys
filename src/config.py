@@ -36,10 +36,10 @@ class Config:
     
     # --- Paths ---
     if IS_KAGGLE:
-        base_dir = '/kaggle/input/movies-resys-cleaned'
+        base_dir = '/kaggle/input/movies-resys-small'
         checkpoint_dir = '/kaggle/working/checkpoints'
     elif IS_COLAB:
-        base_dir = '/content/movies-resys-cleaned'
+        base_dir = '/content/movies-resys-small'
         checkpoint_dir = '/content/checkpoints'
     else:
         base_dir = './ml-20m-psm'
@@ -67,29 +67,34 @@ class Config:
     milvus_port = '19530'
     
     # --- Model Dimensions ---
-    embed_dim = 64
-    feat_dim_v = 512
-    feat_dim_t = 768
+    embed_dim = 64  # d in paper (default 64)
+    feat_dim_v = 512  # Visual feature dimension
+    feat_dim_t = 768  # Text feature dimension
     
-    # --- Training Params ---
-    batch_size = 16384
+    # --- Training Params (Paper Section IV-A) ---
+    batch_size = 2048  # Paper uses 2048
     
-    lr_stage1 = 1e-3        # Stage 1: Higher LR for cold start
-    lr_stage2 = 1e-4        # Stage 2: Lower LR for fine-tuning
+    # Learning rates
+    lr_stage1 = 1e-4  # Paper uses 1e-4 (Adam optimizer)
+    lr_stage2 = 1e-4  # Same for stage 2
+    lr_modality_weights = 1e-4  # Same LR for all params (paper doesn't mention separate LRs)
     
-    lr_modality_weights = 5e-4  # Even lower for weights
+    weight_decay = 1e-4  # β in Equation 9-10 (paper default: tune from [0.01, 0.1, 1])
     
-    weight_decay = 1e-4
+    epochs_stage1 = 50  
+    epochs_stage2 = 50 
     
-    epochs_stage1 = 20
-    epochs_stage2 = 20
+    # --- MARGO Specifics (Paper Section IV-A) ---
+    # Paper: "We tune τ from [0.1, 1, 5, 10]"
+    tau = 1.0  # Temperature for confidence (Equation 7)
     
-    # --- MARGO Specifics ---
-    tau = 1.0               # Increased from 0.1 → Prevent gamma saturation
-    alpha_initial = 0.0     # Start with 0 (warm-up calibration loss)
-    alpha_final = 0.01      # Final value (reduced from 0.1)
-    alpha_warmup_epochs = 5 # Gradually increase alpha over 5 epochs
+    # Paper: "We tune α from [0, 0.01, 0.1, 1]"
+    # Based on Figure 4, α = 0.01 works best for most datasets
+    alpha_initial = 0.0  # Start with 0 (no calibration loss)
+    alpha_final = 0.01  # Paper's best value (from experiments)
+    alpha_warmup_epochs = 0  # Paper doesn't mention warmup, apply immediately
     
+    # Gradient clipping (not mentioned in paper, but good practice)
     grad_clip_norm = 1.0
     
     model_name = 'margo_best'
