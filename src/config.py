@@ -37,10 +37,10 @@ class Config:
     
     # --- Paths ---
     if IS_KAGGLE:
-        base_dir = '/kaggle/input/movies-resys-cleaned'
+        base_dir = '/kaggle/input/movies-resys-small'
         checkpoint_dir = '/kaggle/working/checkpoints'
     elif IS_COLAB:
-        base_dir = '/content/movies-resys-cleaned'
+        base_dir = '/content/movies-resys-small'
         checkpoint_dir = '/content/checkpoints'
     else:
         base_dir = './ml-20m-psm'
@@ -73,7 +73,7 @@ class Config:
     feat_dim_t = 768
     
     # --- Training Params ---
-    batch_size = 16384
+    batch_size = 2048
     
     lr_stage1 = 1e-3              # Stage 1: Higher LR for cold start
     lr_stage2 = 1e-4              # Stage 2: Lower LR for fine-tuning GCN
