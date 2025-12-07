@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 
 class DragonGCN(nn.Module):
     """
@@ -17,13 +16,11 @@ class DragonGCN(nn.Module):
         self.num_nodes = num_user + num_item
         
         # 1. User Preference (Learnable Parameter)
-        # Initialize with Xavier Normal for stable starting point
         self.preference = nn.Parameter(nn.init.xavier_normal_(
             torch.empty(num_user, dim_latent), gain=1.0
         ))
         
         # 2. Projection MLP (Feature -> Latent)
-        # Projects 512/768 vectors to 64 dimensions
         self.mlp = nn.Sequential(
             nn.Linear(input_feat_dim, 4 * dim_latent),
             nn.LeakyReLU(),
@@ -31,7 +28,6 @@ class DragonGCN(nn.Module):
         )
         
         # Pre-calculate Normalized Adjacency Matrix
-        # Used for Message Passing
         self.adj_norm = self._get_norm_adj(edge_index)
 
     def _get_norm_adj(self, edge_index):
@@ -57,26 +53,22 @@ class DragonGCN(nn.Module):
         features: Tensor [num_item, input_dim] retrieved from Milvus
         """
         # STEP 1: Projection
-        # Transform raw features to Initial Item Embedding (E0_item)
         item_emb_0 = self.mlp(features)
         
         # STEP 2: Create Initial Node Features (E0_total)
-        # Concatenate User (Preference) and Item (Projected)
         ego_embeddings = torch.cat([self.preference, item_emb_0], dim=0)
         
         # STEP 3: LightGCN Propagation
-        # Propagate through 2 layers
         all_embeddings = [ego_embeddings]
         
         for k in range(2):
-            # Formula: E(k+1) = Adj_norm * E(k)
             ego_embeddings = torch.sparse.mm(self.adj_norm, ego_embeddings)
             all_embeddings.append(ego_embeddings)
             
         # STEP 4: Layer Combination
-        # Sum or Mean of layers (DRAGON uses Sum/Mean)
-        # Using Mean for stability
-        final_embeddings = torch.stack(all_embeddings, dim=1).mean(dim=1)
+        # FIX: DRAGON uses SUM (Cộng) instead of MEAN (Trung bình)
+        # Reference: hongyurain/models/dragon.py (x_hat = h + x + h_1)
+        final_embeddings = torch.stack(all_embeddings, dim=1).sum(dim=1)
         
         # STEP 5: Split back to User and Item
         u_final = final_embeddings[:self.num_user]

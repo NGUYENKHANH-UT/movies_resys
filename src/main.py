@@ -46,7 +46,9 @@ def main():
         dataset.num_users, 
         dataset.num_items, 
         dataset.edge_index,
-        dataset.user_graph_dict
+        dataset.user_graph_dict,
+        dataset.feat_v, 
+        dataset.feat_t  
     ).to(Config.device)
     
     # 4. Evaluator & Trainer Initialization
