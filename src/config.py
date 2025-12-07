@@ -67,33 +67,37 @@ class Config:
     milvus_host = 'localhost'
     milvus_port = '19530'
     
-    # --- Model Dimensions ---
-    embed_dim  = 64
-    feat_dim_v = 512
-    feat_dim_t = 768
+    # --- Model Dimensions (Paper Section IV-A) ---
+    embed_dim  = 64   # d in paper
+    feat_dim_v = 512  # Visual feature dim
+    feat_dim_t = 768  # Text feature dim
     
-    # --- Training Params ---
-    batch_size = 2048
+    # --- Training Params (Paper Section IV-A) ---
+    batch_size = 2048  # Paper uses 2048
     
-    lr_stage1 = 1e-3              # Stage 1: Higher LR for cold start
-    lr_stage2 = 1e-4              # Stage 2: Lower LR for fine-tuning GCN
+    # Paper: "We adopt the Adam optimizer and use the learning rate of 1e-4"
+    # Paper does NOT mention separate LRs for different parameter groups
+    lr_stage1 = 1e-4  # PAPER EXACT
+    lr_stage2 = 1e-4  # PAPER EXACT
+    lr_modality_weights = 1e-4  # PAPER EXACT (same as others)
     
-    # --- CHANGE 1: Tăng LR cho weights để học nhanh hơn ---
-    lr_modality_weights = 1e-3    # TĂNG: 1e-4 -> 1e-3 (gấp 10 lần)
+    weight_decay = 1e-4  # β in Equation 9-10
     
-    weight_decay = 1e-4
-    
-    epochs_stage1 = 50
+    epochs_stage1 = 50  # Paper uses 100 with early stopping
     epochs_stage2 = 50
     
-    # --- MARGO Specifics (TỐI ƯU) ---
-    tau = 1.0                     # Giữ nguyên (đã tốt)
+    # --- MARGO Specifics (Paper Section IV-A) ---
+    # Paper: "We tune τ from {0.1, 1, 5, 10}"
+    tau = 1.0  # Default value
+    
+    # Paper: "We tune α from {0, 0.01, 0.1, 1}"
+    # From Figure 4 in paper: α = 0.01 works best for most datasets
     alpha_initial = 0.0
+    alpha_final = 0.01  # PAPER EXACT (best value from experiments)
     
-    # --- CHANGE 2: Tăng Alpha để Calibration Loss có trọng lượng hơn ---
-    alpha_final = 0.1             # TĂNG: 0.02 -> 0.1
+    # Paper does NOT mention warmup - apply immediately
+    alpha_warmup_epochs = 0  # PAPER EXACT (no warmup)
     
-    alpha_warmup_epochs = 5
-    grad_clip_norm = 1.0
+    grad_clip_norm = 1.0  # Not in paper, but good practice
     
     model_name = 'margo_best'
