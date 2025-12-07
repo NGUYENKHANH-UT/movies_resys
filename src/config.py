@@ -43,10 +43,10 @@ class Config:
     feat_dim_t = 768        # Text Vector Size (SBERT all-mpnet-base-v2)
     
     # --- Training Params (Adapted for DRAGON) ---
-    batch_size = 8192
+    batch_size = 2048
     lr = 1e-4               # Learning rate (Commonly used for DRAGON)
     weight_decay = 1e-4     # L2 regularization weight (Commonly used for DRAGON)
-    epochs = 20        # Max epochs (Controlled by Early Stopping)
+    epochs = 50        # Max epochs (Controlled by Early Stopping)
     
     # --- DRAGON Specifics (From DRAGON Paper) ---
     L_HETERO = 2            # Layers for Heterogeneous Graph (LightGCN)

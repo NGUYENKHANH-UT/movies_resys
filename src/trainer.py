@@ -23,7 +23,7 @@ class Trainer:
         self.use_amp = False
 
         # Early stopping parameters
-        self.patience_limit = 20 # Follows DRAGON paper (stopping_step=20)
+        self.patience_limit = 20 
         self.best_score = -float('inf')
         self.patience_counter = 0
         
