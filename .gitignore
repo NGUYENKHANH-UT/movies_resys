@@ -4,3 +4,4 @@ milvus/
 ml-20m-psm/
 venv/
 checkpoints/
+__pycache__/

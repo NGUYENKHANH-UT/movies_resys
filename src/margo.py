@@ -33,6 +33,15 @@ class MARGO(nn.Module):
         self.stage = 1
         self.current_alpha = 0.0
         self.last_loss_dict = {}
+        
+        # --- Metrics for MLflow Logging ---
+        self.last_gamma_mean = 0.0
+        self.last_gamma_min = 0.0
+        self.last_gamma_max = 0.0
+        self.last_gamma_zero = 0.0
+        self.last_kl_mean = 0.0
+        self.last_weights_v_mean = 0.5
+        self.last_weights_t_mean = 0.5
 
     def g_mapping(self, x):
         """
@@ -59,7 +68,7 @@ class MARGO(nn.Module):
         z_v_logit = self.g_mapping(diff_v)
         z_t_logit = self.g_mapping(diff_t)
         
-        # Step 3: Softmax (NO temperature scaling in paper)
+        # Step 3: Softmax 
         z = F.softmax(torch.stack([z_v_logit, z_t_logit], dim=1), dim=1)
         
         return z.detach()
@@ -73,7 +82,7 @@ class MARGO(nn.Module):
         """
         score_diff = pos_score - neg_score
         
-        # Apply tanh (NOT sigmoid!)
+        # Apply tanh 
         gamma = torch.tanh(score_diff / Config.tau)
         
         # Hard threshold at 0
@@ -91,7 +100,7 @@ class MARGO(nn.Module):
         
         L_cal = Σ nograd(γ_uik) * KL(nograd(z_uik) || w_i ⊕ w_k)
         
-        Using KL Divergence (NOT JS Divergence):
+        Using KL Divergence:
         KL(p||q) = Σ p * log(p/q)
         """
         # Paper uses w_i ⊕ w_k (element-wise sum)
@@ -109,7 +118,7 @@ class MARGO(nn.Module):
         # Weighted by confidence
         cal_loss = torch.mean(gamma * kl_div)
         
-        return cal_loss
+        return cal_loss, kl_div
 
     def forward(self, batch_data, feat_v, feat_t):
         """
@@ -140,6 +149,12 @@ class MARGO(nn.Module):
         # ====================================================
         w_pos = F.softmax(self.item_modality_weights[pos_ids], dim=1)
         w_neg = F.softmax(self.item_modality_weights[neg_ids], dim=1)
+        
+        # Track modality weights for logging (Stage 2)
+        if self.stage == 2:
+            with torch.no_grad():
+                self.last_weights_v_mean = w_pos[:, 0].mean().item()
+                self.last_weights_t_mean = w_pos[:, 1].mean().item()
         
         if self.stage == 1:
             # Stage 1: Simple sum (Equation 9)
@@ -186,11 +201,24 @@ class MARGO(nn.Module):
             gamma = self.compute_confidence(pos_score, neg_score)
             
             # Compute calibration loss (Equation 8)
-            cal_loss = self.compute_calibration_loss(z, gamma, w_pos, w_neg)
+            cal_loss, kl_div = self.compute_calibration_loss(z, gamma, w_pos, w_neg)
             
             loss = loss + self.current_alpha * cal_loss
             self.last_loss_dict['cal'] = cal_loss.item()
             self.last_loss_dict['total'] = loss.item()
+            
+            # ====================================================
+            # STEP 7: Track Metrics for MLflow Logging
+            # ====================================================
+            with torch.no_grad():
+                # Gamma statistics
+                self.last_gamma_mean = gamma.mean().item()
+                self.last_gamma_min = gamma.min().item()
+                self.last_gamma_max = gamma.max().item()
+                self.last_gamma_zero = (gamma == 0).float().mean().item()
+                
+                # KL divergence mean (raw values before weighting)
+                self.last_kl_mean = kl_div.mean().item()
         
         return loss
 

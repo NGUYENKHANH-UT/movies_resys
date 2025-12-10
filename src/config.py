@@ -61,37 +61,56 @@ class Config:
     milvus_host = 'localhost'
     milvus_port = '19530'
     
+    # --- MLflow Configuration ---
+    mlflow_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "https://mlflow.sean.io.vn")
+    mlflow_experiment_name = "Recsys_Movies"
+    
+    # MLflow S3/MinIO Configuration
+    mlflow_s3_endpoint = os.getenv("MLFLOW_S3_ENDPOINT_URL", "https://apiminio.sean.io.vn/")
+    mlflow_s3_ignore_tls = "true"
+    
+    # AWS Credentials for MinIO
+    aws_access_key = os.getenv("AWS_ACCESS_KEY_ID", "minioadmin")
+    aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin123")
+    
+    # MLflow Run Configuration
+    mlflow_run_name = None  # Will be set dynamically (e.g., "stage1_run1")
+    mlflow_enable = True  # Global flag to enable/disable MLflow logging
+    
     # --- Model Dimensions (Paper Section IV-A) ---
-    embed_dim  = 64   # d in paper
-    feat_dim_v = 512  # Visual feature dim
-    feat_dim_t = 768  # Text feature dim
+    embed_dim  = 64  
+    feat_dim_v = 512 
+    feat_dim_t = 768 
     
     # --- Training Params (Paper Section IV-A) ---
-    batch_size = 2048  # Paper uses 2048
+    batch_size = 16384  
     
-    # Paper: "We adopt the Adam optimizer and use the learning rate of 1e-4"
-    # Paper does NOT mention separate LRs for different parameter groups
-    lr_stage1 = 1e-4  # PAPER EXACT
-    lr_stage2 = 1e-4  # PAPER EXACT
-    lr_modality_weights = 1e-4  # PAPER EXACT (same as others)
+    lr_stage1 = 1e-4  
+    lr_stage2 = 1e-4 
+    lr_modality_weights = 1e-4  
     
-    weight_decay = 1e-4  # β in Equation 9-10
+    weight_decay = 1e-4  
     
-    epochs_stage1 = 50  # Paper uses 100 with early stopping
-    epochs_stage2 = 50
+    epochs_stage1 = 20 
+    epochs_stage2 = 20
     
     # --- MARGO Specifics (Paper Section IV-A) ---
-    # Paper: "We tune τ from {0.1, 1, 5, 10}"
     tau = 1.0  # Default value
     
-    # Paper: "We tune α from {0, 0.01, 0.1, 1}"
-    # From Figure 4 in paper: α = 0.01 works best for most datasets
     alpha_initial = 0.0
-    alpha_final = 0.01  # PAPER EXACT (best value from experiments)
+    alpha_final = 0.01 
     
-    # Paper does NOT mention warmup - apply immediately
-    alpha_warmup_epochs = 0  # PAPER EXACT (no warmup)
+    alpha_warmup_epochs = 0 
     
-    grad_clip_norm = 1.0  # Not in paper, but good practice
+    grad_clip_norm = 1.0 
     
     model_name = 'margo_best'
+    
+    @classmethod
+    def setup_mlflow_env(cls):
+        """Setup environment variables for MLflow"""
+        os.environ["MLFLOW_TRACKING_URI"] = cls.mlflow_tracking_uri
+        os.environ["MLFLOW_S3_ENDPOINT_URL"] = cls.mlflow_s3_endpoint
+        os.environ["MLFLOW_S3_IGNORE_TLS"] = cls.mlflow_s3_ignore_tls
+        os.environ["AWS_ACCESS_KEY_ID"] = cls.aws_access_key
+        os.environ["AWS_SECRET_ACCESS_KEY"] = cls.aws_secret_key
