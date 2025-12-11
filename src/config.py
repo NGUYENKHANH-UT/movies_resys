@@ -37,10 +37,10 @@ class Config:
     
     # --- Paths ---
     if IS_KAGGLE:
-        base_dir = '/kaggle/input/movies-resys-small'
+        base_dir = '/kaggle/input/movies-resys-cleaned'
         checkpoint_dir = '/kaggle/working/checkpoints'
     elif IS_COLAB:
-        base_dir = '/content/movies-resys-small'
+        base_dir = '/content/movies-resys-cleaned'
         checkpoint_dir = '/content/checkpoints'
     else:
         base_dir = './ml-20m-psm'
