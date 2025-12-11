@@ -75,7 +75,7 @@ class Config:
     
     # MLflow Run Configuration
     mlflow_run_name = None  # Will be set dynamically (e.g., "stage1_run1")
-    mlflow_enable = True  # Global flag to enable/disable MLflow logging
+    mlflow_enable = False  # Global flag to enable/disable MLflow logging
     
     # --- Model Dimensions (Paper Section IV-A) ---
     embed_dim  = 64  
