@@ -8,12 +8,12 @@ class MARGO(nn.Module):
     """
     MARGO: Paper-exact implementation following all equations precisely.
     
-    Key Changes from Modified Version:
-    1. Hard threshold g(x) instead of soft scaling
-    2. tanh confidence instead of sigmoid
-    3. KL divergence instead of JS divergence
-    4. No normalization/temperature in reliability calculation
-    5. Paper-exact alpha and LR values
+    Key Implementation Details:
+    1. z (reliability) computed from modality-specific ratings BEFORE fusion (Eq. 5-6)
+    2. γ (confidence) computed from final fused ratings AFTER fusion (Eq. 7)
+    3. Hard threshold g(x) mapping function (Eq. 6)
+    4. tanh confidence instead of sigmoid (Eq. 7)
+    5. KL divergence for calibration loss (Eq. 8)
     """
     def __init__(self, num_users, num_items, edge_index):
         super(MARGO, self).__init__()
@@ -25,8 +25,7 @@ class MARGO(nn.Module):
         self.t_gcn = DragonGCN(num_users, num_items, Config.feat_dim_t, Config.embed_dim, edge_index, self.device)
         
         # --- MARGO PARAMETERS ---
-        # Paper doesn't specify initialization, but zeros → softmax(0,0) = (0.5, 0.5)
-        # This is cleaner than adding noise
+        # Initialize weights to zeros → softmax(0,0) = (0.5, 0.5)
         init_weights = torch.zeros(num_items, 2)
         self.item_modality_weights = nn.Parameter(init_weights.to(self.device))
         
@@ -57,7 +56,9 @@ class MARGO(nn.Module):
         """
         Paper Equation 5-6: Modality Reliability Vector
         
-        d_uik = [y_ui^v - y_uk^v, y_ui^t - y_uk^t]
+        IMPORTANT: This uses modality-specific ratings y^m_ui (BEFORE fusion with weights)
+        
+        d_uik = [y^v_ui - y^v_uk, y^t_ui - y^t_uk]
         z_uik = softmax(g(d_uik))
         """
         # Step 1: Calculate difference vector (Equation 5)
@@ -68,7 +69,7 @@ class MARGO(nn.Module):
         z_v_logit = self.g_mapping(diff_v)
         z_t_logit = self.g_mapping(diff_t)
         
-        # Step 3: Softmax 
+        # Step 3: Softmax to get reliability distribution
         z = F.softmax(torch.stack([z_v_logit, z_t_logit], dim=1), dim=1)
         
         return z.detach()
@@ -77,12 +78,14 @@ class MARGO(nn.Module):
         """
         Paper Equation 7: Confidence
         
+        IMPORTANT: This uses final fused rating y_ui (AFTER fusion with weights)
+        
         γ_uik = tanh((y_ui - y_uk) / τ),  if y_ui > y_uk
         γ_uik = 0,                         if y_ui <= y_uk
         """
         score_diff = pos_score - neg_score
         
-        # Apply tanh 
+        # Apply tanh scaling
         gamma = torch.tanh(score_diff / Config.tau)
         
         # Hard threshold at 0
@@ -123,11 +126,18 @@ class MARGO(nn.Module):
     def forward(self, batch_data, feat_v, feat_t):
         """
         Forward pass following paper pipeline exactly.
+        
+        Correct Order:
+        1. Compute modality-specific ratings (Eq. 2)
+        2. Compute reliability z from modality-specific ratings (Eq. 5-6) ← BEFORE fusion
+        3. Fusion with weights → final rating (Eq. 3)
+        4. Compute confidence γ from final rating (Eq. 7) ← AFTER fusion
+        5. Calibration loss (Eq. 8)
         """
         u_ids, pos_ids, neg_ids = batch_data
         
         # ====================================================
-        # STEP 1: Get Embeddings (Equation 1-2)
+        # STEP 1: Get Embeddings (Equation 1)
         # ====================================================
         u_v_all, i_v_all = self.v_gcn(feat_v)
         u_t_all, i_t_all = self.t_gcn(feat_t)
@@ -138,6 +148,7 @@ class MARGO(nn.Module):
         
         # ====================================================
         # STEP 2: Modality-Specific Ratings (Equation 2)
+        # These are y^m_ui - BEFORE fusion with weights
         # ====================================================
         pos_score_v = (u_v * pos_iv).sum(dim=1)
         pos_score_t = (u_t * pos_it).sum(dim=1)
@@ -145,7 +156,20 @@ class MARGO(nn.Module):
         neg_score_t = (u_t * neg_it).sum(dim=1)
         
         # ====================================================
-        # STEP 3: Score Fusion (Equation 3)
+        # STEP 3: Compute Reliability Vector (Equation 5-6)
+        # CRITICAL: Must be computed BEFORE fusion with weights!
+        # z uses modality-specific ratings y^m_ui
+        # ====================================================
+        if self.stage == 2 and self.current_alpha > 0:
+            z = self.compute_modality_reliability(
+                pos_score_v, pos_score_t,
+                neg_score_v, neg_score_t
+            )
+        else:
+            z = None
+        
+        # ====================================================
+        # STEP 4: Get Modality Weights
         # ====================================================
         w_pos = F.softmax(self.item_modality_weights[pos_ids], dim=1)
         w_neg = F.softmax(self.item_modality_weights[neg_ids], dim=1)
@@ -156,6 +180,10 @@ class MARGO(nn.Module):
                 self.last_weights_v_mean = w_pos[:, 0].mean().item()
                 self.last_weights_t_mean = w_pos[:, 1].mean().item()
         
+        # ====================================================
+        # STEP 5: Score Fusion (Equation 3)
+        # This produces y_ui - AFTER fusion with weights
+        # ====================================================
         if self.stage == 1:
             # Stage 1: Simple sum (Equation 9)
             pos_score = pos_score_v + pos_score_t
@@ -166,12 +194,12 @@ class MARGO(nn.Module):
             neg_score = w_neg[:, 0] * neg_score_v + w_neg[:, 1] * neg_score_t
         
         # ====================================================
-        # STEP 4: BPR Loss (Equation 4)
+        # STEP 6: BPR Loss (Equation 4)
         # ====================================================
         bpr_loss = F.softplus(neg_score - pos_score).mean()
         
         # ====================================================
-        # STEP 5: Regularization (Equation 9-10)
+        # STEP 7: Regularization (Equation 9-10)
         # ====================================================
         reg_loss = Config.weight_decay * (
             self.v_gcn.preference.pow(2).sum() + 
@@ -188,16 +216,11 @@ class MARGO(nn.Module):
         }
         
         # ====================================================
-        # STEP 6: Calibration Loss (Stage 2, Equation 8)
+        # STEP 8: Calibration Loss (Stage 2, Equation 7-8)
         # ====================================================
-        if self.stage == 2 and self.current_alpha > 0:
-            # Compute reliability (Equation 5-6)
-            z = self.compute_modality_reliability(
-                pos_score_v, pos_score_t,
-                neg_score_v, neg_score_t
-            )
-            
-            # Compute confidence (Equation 7)
+        if self.stage == 2 and self.current_alpha > 0 and z is not None:
+            # Compute confidence from FINAL fused ratings (Equation 7)
+            # γ uses y_ui - AFTER fusion with weights
             gamma = self.compute_confidence(pos_score, neg_score)
             
             # Compute calibration loss (Equation 8)
@@ -208,7 +231,7 @@ class MARGO(nn.Module):
             self.last_loss_dict['total'] = loss.item()
             
             # ====================================================
-            # STEP 7: Track Metrics for MLflow Logging
+            # STEP 9: Track Metrics for MLflow Logging
             # ====================================================
             with torch.no_grad():
                 # Gamma statistics
