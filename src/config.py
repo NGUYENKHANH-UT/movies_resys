@@ -92,7 +92,7 @@ class Config:
     weight_decay = 1e-4  
     
     epochs_stage1 = 20 
-    epochs_stage2 = 20
+    epochs_stage2 = 40
     
     # --- MARGO Specifics (Paper Section IV-A) ---
     tau = 1.0  # Default value
