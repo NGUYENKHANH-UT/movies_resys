@@ -89,7 +89,7 @@ class Config:
     lr_stage2 = 1e-4 
     lr_modality_weights = 1e-4  
     
-    weight_decay = 1e-4  
+    weight_decay = 0.01  
     
     epochs_stage1 = 20 
     epochs_stage2 = 40

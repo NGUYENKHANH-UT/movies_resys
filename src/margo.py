@@ -109,7 +109,7 @@ class MARGO(nn.Module):
         # Paper uses w_i ⊕ w_k (element-wise sum)
         # We normalize to keep it as probability distribution
         w_sum = w_pos + w_neg
-        w_sum = F.softmax(w_sum, dim=1)  # Re-normalize
+        # w_sum = F.softmax(w_sum, dim=1)  # Re-normalize
         
         # KL Divergence (Paper Equation 8)
         epsilon = 1e-8
@@ -201,10 +201,15 @@ class MARGO(nn.Module):
         # ====================================================
         # STEP 7: Regularization (Equation 9-10)
         # ====================================================
-        reg_loss = Config.weight_decay * (
-            self.v_gcn.preference.pow(2).sum() + 
-            self.t_gcn.preference.pow(2).sum()
-        ) / 2.0
+        reg_loss = 0.0
+
+        for p in self.v_gcn.parameters():
+            reg_loss = reg_loss + p.pow(2).sum()
+
+        for p in self.t_gcn.parameters():
+            reg_loss = reg_loss + p.pow(2).sum()
+
+        reg_loss = Config.weight_decay * reg_loss
         
         loss = bpr_loss + reg_loss
         
